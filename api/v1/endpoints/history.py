@@ -28,6 +28,7 @@ from api.v1.schemas.history import (
     ReportStrategy,
     ReportDetails,
     MarkdownReportResponse,
+    ExportFormatEnum,
 )
 from api.v1.schemas.common import ErrorResponse
 from src.storage import DatabaseManager
@@ -466,3 +467,167 @@ def get_history_markdown(
         )
 
     return MarkdownReportResponse(content=markdown_content)
+
+
+@router.get(
+    "/{record_id}/export",
+    responses={
+        200: {"description": "导出的报告文件"},
+        404: {"description": "报告不存在", "model": ErrorResponse},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="导出历史报告为指定格式",
+    description="根据分析历史记录 ID 导出报告为 Markdown、Word、RTF、HTML 或 PDF 格式"
+)
+def export_history_report(
+    record_id: str,
+    format: ExportFormatEnum = Query(default=ExportFormatEnum.MD, description="导出格式: md, docx, rtf, html, pdf"),
+    db_manager: DatabaseManager = Depends(get_database_manager)
+):
+    """
+    导出历史报告为指定格式
+
+    支持多种格式：Markdown (.md)、Word (.docx)、RTF (.rtf)、HTML (.html)、PDF (.pdf)
+
+    Args:
+        record_id: 分析历史记录主键 ID（整数）或 query_id（字符串）
+        format: 导出格式
+        db_manager: 数据库管理器依赖
+
+    Returns:
+        File response with the exported report
+
+    Raises:
+        HTTPException: 404 - 报告不存在
+        HTTPException: 500 - 导出失败
+    """
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    from src.services.report_export_service import ReportExportService
+    from src.services.history_service import HistoryService, MarkdownReportGenerationError
+    
+    service = HistoryService(db_manager)
+
+    # 先获取 Markdown 内容
+    try:
+        markdown_content = service.get_markdown_report(record_id)
+    except MarkdownReportGenerationError as e:
+        logger.error(f"Markdown report generation failed for {record_id}: {e.message}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "generation_failed",
+                "message": f"生成 Markdown 报告失败: {e.message}"
+            }
+        )
+    except Exception as e:
+        logger.error(f"获取 Markdown 报告失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "internal_error",
+                "message": f"获取 Markdown 报告失败: {str(e)}"
+            }
+        )
+
+    if markdown_content is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_found",
+                "message": f"未找到 id/query_id={record_id} 的分析记录"
+            }
+        )
+
+    # 根据格式导出
+    try:
+        # 获取股票信息用于文件名
+        record = service._resolve_record(record_id)
+        stock_name = record.name if record else "report"
+        stock_code = record.code if record else "unknown"
+        
+        # 清理文件名中的特殊字符
+        safe_name = f"{stock_name}_{stock_code}".replace("/", "_").replace("\\", "_")
+        
+        reports_dir = Path(__file__).parent.parent.parent.parent / 'reports'
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        
+        if format == ExportFormatEnum.MD:
+            filepath = reports_dir / f"{safe_name}_report.md"
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            media_type = "text/markdown"
+            
+        elif format == ExportFormatEnum.DOCX:
+            filepath_str = ReportExportService.export_to_docx(markdown_content)
+            filepath = Path(filepath_str)
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            
+        elif format == ExportFormatEnum.RTF:
+            filepath_str = ReportExportService.export_to_rtf(markdown_content)
+            filepath = Path(filepath_str)
+            media_type = "application/rtf"
+            
+        elif format == ExportFormatEnum.HTML:
+            filepath_str = ReportExportService.export_to_html(markdown_content)
+            filepath = Path(filepath_str)
+            media_type = "text/html"
+            
+        elif format == ExportFormatEnum.PDF:
+            filepath_str = ReportExportService.export_to_pdf(markdown_content)
+            filepath = Path(filepath_str)
+            media_type = "application/pdf"
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+        
+        if not filepath.exists():
+            raise FileNotFoundError(f"Export file not created: {filepath}")
+        
+        filename = filepath.name
+        
+        # URL 编码文件名以支持中文
+        from urllib.parse import quote
+        encoded_filename = quote(filename, safe='')
+        
+        return FileResponse(
+            path=str(filepath),
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+        
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "export_failed",
+                "message": "导出文件创建失败"
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_format",
+                "message": str(e)
+            }
+        )
+    except ImportError as e:
+        logger.error(f"缺少必要的库: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "missing_dependency",
+                "message": f"缺少必要的依赖库: {str(e)}。请运行: pip install -r requirements.txt"
+            }
+        )
+    except Exception as e:
+        logger.error(f"导出报告失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "export_failed",
+                "message": f"导出报告失败: {str(e)}"
+            }
+        )

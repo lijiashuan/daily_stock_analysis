@@ -79,6 +79,36 @@ export const historyApi = {
   },
 
   /**
+   * 导出历史报告为指定格式
+   * @param recordId 分析历史记录主键 ID
+   * @param format 导出格式: 'md' | 'docx' | 'rtf' | 'html' | 'pdf'
+   * @returns Blob 对象，可用于下载
+   */
+  exportReport: async (recordId: number, format: 'md' | 'docx' | 'rtf' | 'html' | 'pdf' = 'md'): Promise<Blob> => {
+    const response = await apiClient.get(`/api/v1/history/${recordId}/export`, {
+      params: { format },
+      responseType: 'blob',
+      validateStatus: (status) => status < 500, // 允许接收错误响应
+    });
+    
+    // 检查是否是错误响应（后端返回JSON错误而不是文件）
+    if (response.headers['content-type']?.includes('application/json')) {
+      const text = await response.data.text();
+      try {
+        const error = JSON.parse(text);
+        throw new Error(error.detail?.message || error.detail || '导出失败');
+      } catch (e) {
+        if (e instanceof Error) {
+          throw e;
+        }
+        throw new Error('导出失败：未知错误');
+      }
+    }
+    
+    return response.data;
+  },
+
+  /**
    * 批量删除历史记录
    * @param recordIds 分析历史记录主键 ID 列表
    */

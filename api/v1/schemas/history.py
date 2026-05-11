@@ -10,6 +10,7 @@
 """
 
 from typing import Optional, List, Any
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -204,5 +205,30 @@ class MarkdownReportResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "content": "# 📊 贵州茅台 (600519) 分析报告\n\n> 分析日期：**2024-01-01**\n\n..."
+            }
+        }
+
+
+class ExportFormatEnum(str, Enum):
+    """导出格式枚举"""
+    MD = "md"
+    DOCX = "docx"
+    RTF = "rtf"
+    HTML = "html"
+    PDF = "pdf"
+
+
+class ExportReportRequest(BaseModel):
+    """导出报告请求"""
+    
+    format: ExportFormatEnum = Field(
+        default=ExportFormatEnum.MD,
+        description="导出格式: md, docx, rtf, html, pdf"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "format": "pdf"
             }
         }

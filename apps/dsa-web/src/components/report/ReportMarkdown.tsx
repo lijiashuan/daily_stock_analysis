@@ -43,6 +43,31 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
     setTimeout(onClose, 300);
   }, [onClose]);
 
+  // Handle download as file from backend API
+  const handleDownloadFromAPI = useCallback(async (format: 'md' | 'docx' | 'rtf' | 'html' | 'pdf') => {
+    try {
+      const blob = await historyApi.exportReport(recordId, format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${stockName || stockCode}_report.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+      const errorMessage = error instanceof Error ? error.message : '未知错误';
+      
+      // 针对 PDF 导出的特殊提示
+      if (format === 'pdf' && (errorMessage.includes('imgkit') || errorMessage.includes('weasyprint') || errorMessage.includes('wkhtmltopdf'))) {
+        alert(`PDF 导出需要安装额外工具\n\n${errorMessage}\n\n请查看 docs/PDF_SETUP_GUIDE.md 了解如何安装`);
+      } else {
+        alert(`下载失败: ${errorMessage}`);
+      }
+    }
+  }, [recordId, stockName, stockCode]);
+
   // Handle copy markdown source
   const handleCopyMarkdown = useCallback(async () => {
     if (!content) return;
@@ -122,6 +147,65 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
 
         {/* Right: Toolbar */}
         <div className="flex items-center gap-2">
+          {/* Download dropdown */}
+          <div className="relative group">
+            <Tooltip content={text.downloadReport}>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  disabled={isLoading || !content}
+                  className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
+                  aria-label="下载报告"
+                >
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </button>
+              </span>
+            </Tooltip>
+            
+            {/* Dropdown menu */}
+            <div className="absolute right-0 mt-2 w-48 bg-card border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+              <div className="py-1">
+                <button
+                  onClick={() => handleDownloadFromAPI('md')}
+                  disabled={isLoading || !content}
+                  className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {text.exportFormats.md}
+                </button>
+                <button
+                  onClick={() => handleDownloadFromAPI('pdf')}
+                  disabled={isLoading || !content}
+                  className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {text.exportFormats.pdf}
+                </button>
+                <button
+                  onClick={() => handleDownloadFromAPI('docx')}
+                  disabled={isLoading || !content}
+                  className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {text.exportFormats.docx}
+                </button>
+                <button
+                  onClick={() => handleDownloadFromAPI('html')}
+                  disabled={isLoading || !content}
+                  className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {text.exportFormats.html}
+                </button>
+                <button
+                  onClick={() => handleDownloadFromAPI('rtf')}
+                  disabled={isLoading || !content}
+                  className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {text.exportFormats.rtf}
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Copy Markdown button */}
           <Tooltip content={text.copyMarkdownSource}>
             <span className="inline-flex">
@@ -175,6 +259,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
         <div className="flex flex-col items-center justify-center h-64">
           <div className="home-spinner h-10 w-10 animate-spin border-[3px]" />
           <p className="mt-4 text-secondary-text text-sm">{text.loadingReport}</p>
+          <p className="mt-2 text-xs text-muted-text">首次加载可能需要几秒...</p>
         </div>
       ) : error ? (
         <div className="flex flex-col items-center justify-center h-64">

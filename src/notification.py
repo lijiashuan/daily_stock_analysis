@@ -1752,6 +1752,90 @@ class NotificationService(
         logger.info(f"日报已保存到: {filepath}")
         return str(filepath)
 
+    def export_report_as_docx(
+        self,
+        content: str,
+        filename: Optional[str] = None
+    ) -> str:
+        """
+        导出报告为 Word 文档 (.docx)
+        
+        Args:
+            content: Markdown 格式的报告内容
+            filename: 文件名（可选）
+            
+        Returns:
+            保存的文件路径
+        """
+        from pathlib import Path
+        from src.services.report_export_service import ReportExportService
+        
+        if filename is None:
+            date_str = datetime.now().strftime('%Y%m%d')
+            filename = f"report_{date_str}.docx"
+        
+        reports_dir = Path(__file__).parent.parent / 'reports'
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        filepath = reports_dir / filename
+        
+        return ReportExportService.export_to_docx(content, filepath)
+
+    def export_report_as_rtf(
+        self,
+        content: str,
+        filename: Optional[str] = None
+    ) -> str:
+        """
+        导出报告为 RTF 富文本格式
+        
+        Args:
+            content: Markdown 格式的报告内容
+            filename: 文件名（可选）
+            
+        Returns:
+            保存的文件路径
+        """
+        from pathlib import Path
+        from src.services.report_export_service import ReportExportService
+        
+        if filename is None:
+            date_str = datetime.now().strftime('%Y%m%d')
+            filename = f"report_{date_str}.rtf"
+        
+        reports_dir = Path(__file__).parent.parent / 'reports'
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        filepath = reports_dir / filename
+        
+        return ReportExportService.export_to_rtf(content, filepath)
+
+    def export_report_as_html(
+        self,
+        content: str,
+        filename: Optional[str] = None
+    ) -> str:
+        """
+        导出报告为 HTML 格式
+        
+        Args:
+            content: Markdown 格式的报告内容
+            filename: 文件名（可选）
+            
+        Returns:
+            保存的文件路径
+        """
+        from pathlib import Path
+        from src.services.report_export_service import ReportExportService
+        
+        if filename is None:
+            date_str = datetime.now().strftime('%Y%m%d')
+            filename = f"report_{date_str}.html"
+        
+        reports_dir = Path(__file__).parent.parent / 'reports'
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        filepath = reports_dir / filename
+        
+        return ReportExportService.export_to_html(content, filepath)
+
 
 class NotificationBuilder:
     """

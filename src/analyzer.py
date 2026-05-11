@@ -1520,6 +1520,8 @@ class GeminiAnalyzer:
                         request_overrides={"extra_body": extra} if extra else None,
                     ),
                     "max_tokens": max_tokens,
+                    # Set timeout for Ollama and other providers (600s for local models with fallback)
+                    "request_timeout": 600,
                 }
                 if extra:
                     call_kwargs["extra_body"] = extra
