@@ -1,0 +1,68 @@
+# Render.com 部署配置
+# 文档: https://render.com/docs/blueprint-spec
+
+services:
+  # Web 服务 - FastAPI 后端 + 前端静态文件
+  - type: web
+    name: daily-stock-analysis
+    env: python
+    region: oregon  # 美国西海岸，延迟较低
+    plan: starter  # 免费套餐，750 小时/月
+    branch: main
+    buildCommand: |
+      # 安装 Python 依赖
+      pip install -r requirements.txt
+      # 构建前端
+      cd apps/dsa-web && npm ci && npm run build
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    
+    # 环境变量（需要在 Render Dashboard 中配置敏感信息）
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: TZ
+        value: Asia/Shanghai
+      - key: LOG_DIR
+        value: /var/data/logs
+      - key: DATABASE_PATH
+        value: /var/data/stock_analysis.db
+      - key: WEBUI_HOST
+        value: 0.0.0.0
+      # 以下变量需要在 Render Dashboard 手动配置：
+      # - LLM_API_KEY (OpenAI/其他 LLM 的 API Key)
+      # - OPENAI_API_BASE (如果使用其他兼容接口)
+      # - TUSHARE_TOKEN (如果使用 Tushare 数据源)
+      # - 其他敏感配置...
+    
+    # 持久化存储
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1  # 免费套餐最大 1GB
+    
+    # 健康检查
+    healthCheckPath: /api/health
+    
+    # 自动部署
+    autoDeploy: true
+
+# 说明：
+# 1. 免费套餐限制：
+#    - 每月 750 小时（约 31 天连续运行）
+#    - 512MB 内存
+#    - 1GB 磁盘存储
+#    - 15 分钟无请求后休眠
+#
+# 2. 部署步骤：
+#    a. 在 Render.com 创建账号
+#    b. 点击 "New +" -> "Blueprint"
+#    c. 连接 GitHub 仓库
+#    d. Render 会自动读取 render.yaml 并创建服务
+#    e. 在 Dashboard 中配置环境变量（LLM API Key 等）
+#    f. 等待部署完成（约 5-10 分钟）
+#
+# 3. 注意事项：
+#    - 免费套餐会在 15 分钟无请求后休眠，首次访问需等待唤醒（约 30-60 秒）
+#    - 建议升级到 Starter 计划 ($7/月) 以获得更好性能和不休眠
+#    - 数据库使用 SQLite，免费套餐 1GB 够用
+#    - 如需定时任务，建议使用 Render Cron Job（付费功能）或 GitHub Actions
