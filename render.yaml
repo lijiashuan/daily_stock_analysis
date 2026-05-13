@@ -6,7 +6,6 @@ services:
   - type: web
     name: daily-stock-analysis
     env: python
-    runtime: python3.12  # Pin to 3.12 for stable wheel availability (tiktoken/litellm)
     region: oregon  # 美国西海岸，延迟较低
     plan: starter  # 免费套餐，750 小时/月
     branch: main
@@ -16,6 +15,7 @@ services:
       # Build frontend
       cd apps/dsa-web && npm ci && npm run build
     startCommand: python -m uvicorn server:app --host 0.0.0.0 --port $PORT
+    pythonVersion: "3.12"
     
     # 环境变量（需要在 Render Dashboard 中配置敏感信息）
     envVars:
