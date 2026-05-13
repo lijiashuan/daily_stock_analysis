@@ -10,8 +10,8 @@ services:
     plan: starter  # 免费套餐，750 小时/月
     branch: main
     buildCommand: |
-      # 安装 Python 依赖（跳过可选的 longbridge 包）
-      pip install --no-cache-dir -r requirements.txt --ignore-installed longbridge || pip install --no-cache-dir -r requirements.txt
+      # 安装 Python 依赖（使用 Render 专用文件，排除 longbridge）
+      pip install --no-cache-dir -r requirements-render.txt
       # 构建前端
       cd apps/dsa-web && npm ci && npm run build
     startCommand: python -m uvicorn server:app --host 0.0.0.0 --port $PORT
