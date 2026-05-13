@@ -49,8 +49,19 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
       const blob = await historyApi.exportReport(recordId, format);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
+      
+      // Generate filename with format: 综合报告_股票名称_日期_时间
+      const now = new Date();
+      const dateStr = now.getFullYear().toString() +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0');
+      const timeStr = String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0');
+      const stockNamePart = stockName || stockCode;
+      const filename = `综合报告_${stockNamePart}_${dateStr}_${timeStr}.${format}`;
+      
       a.href = url;
-      a.download = `${stockName || stockCode}_report.${format}`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

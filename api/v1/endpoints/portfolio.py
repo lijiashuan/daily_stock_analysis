@@ -459,7 +459,7 @@ def get_snapshot(
     "/imports/csv/parse",
     response_model=PortfolioImportParseResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Parse broker CSV into normalized trade records",
+    summary="Parse broker CSV/Excel into normalized trade records",
 )
 def parse_csv_import(
     broker: str = Form(..., description="Broker id: huatai/citic/cmb"),
@@ -468,7 +468,8 @@ def parse_csv_import(
     importer = PortfolioImportService()
     try:
         content = file.file.read()
-        parsed = importer.parse_trade_csv(broker=broker, content=content)
+        filename = file.filename or ""
+        parsed = importer.parse_trade_csv(broker=broker, content=content, filename=filename)
         return PortfolioImportParseResponse(
             broker=parsed["broker"],
             record_count=parsed["record_count"],
@@ -476,11 +477,12 @@ def parse_csv_import(
             error_count=parsed["error_count"],
             records=[_serialize_import_record(item) for item in parsed.get("records", [])],
             errors=list(parsed.get("errors", [])),
+            skip_reasons=parsed.get("skip_reasons", {}),  # 新增：返回跳过原因
         )
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("Parse CSV import failed", exc)
+        raise _internal_error("Parse import failed", exc)
 
 
 @router.get(
@@ -501,7 +503,7 @@ def list_csv_brokers() -> PortfolioImportBrokerListResponse:
     "/imports/csv/commit",
     response_model=PortfolioImportCommitResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Parse and commit broker CSV with dedup",
+    summary="Parse and commit broker CSV/Excel with dedup",
 )
 def commit_csv_import(
     account_id: int = Form(...),
@@ -512,18 +514,35 @@ def commit_csv_import(
     importer = PortfolioImportService()
     try:
         content = file.file.read()
-        parsed = importer.parse_trade_csv(broker=broker, content=content)
+        filename = file.filename or ""
+        parsed = importer.parse_trade_csv(broker=broker, content=content, filename=filename)
+        
+        # Log parse statistics
+        logger.info(f"Parsed {parsed['record_count']} records, skipped {parsed['skipped_count']}")
+        if parsed.get('skip_reasons'):
+            logger.warning(f"Skip reasons: {parsed['skip_reasons']}")
+        
         result = importer.commit_trade_records(
             account_id=account_id,
             broker=parsed["broker"],
             records=list(parsed.get("records", [])),
             dry_run=dry_run,
         )
+        
+        # Log commit statistics
+        logger.info(
+            f"Commit result: inserted={result['inserted_count']}, "
+            f"duplicate={result['duplicate_count']}, "
+            f"failed={result['failed_count']}"
+        )
+        if result.get('errors'):
+            logger.error(f"Commit errors: {result['errors'][:10]}")
+        
         return PortfolioImportCommitResponse(**result)
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("Commit CSV import failed", exc)
+        raise _internal_error("Commit import failed", exc)
 
 
 @router.post(

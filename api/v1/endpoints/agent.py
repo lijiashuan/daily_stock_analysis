@@ -9,7 +9,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -464,3 +464,126 @@ async def agent_chat_stream(request: ChatRequest):
             "Connection": "keep-alive",
         },
     )
+
+
+# ============================================================
+# Chat session export endpoint
+# ============================================================
+
+from api.v1.schemas.history import ExportFormatEnum
+from datetime import datetime
+
+@router.get("/chat/sessions/{session_id}/export")
+async def export_chat_session(
+    session_id: str,
+    format: ExportFormatEnum = Query(default=ExportFormatEnum.MD, description="导出格式: md, docx, rtf, html, pdf"),
+):
+    """
+    Export chat session content in specified format.
+    
+    Args:
+        session_id: Chat session ID
+        format: Export format (md, docx, rtf, html, pdf)
+    
+    Returns:
+        File response with the exported content
+    """
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    from src.storage import get_db
+    from src.services.report_export_service import ReportExportService
+    
+    # Get chat messages from database
+    db = get_db()
+    messages = db.get_conversation_messages(session_id, limit=1000)
+    
+    if not messages:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found or empty"
+            }
+        )
+    
+    # Format messages as Markdown
+    markdown_lines = ["# 问股会话", ""]
+    for msg in messages:
+        role_label = "用户" if msg.get("role") == "user" else "AI"
+        markdown_lines.append(f"## {role_label}")
+        markdown_lines.append("")
+        markdown_lines.append(msg.get("content", ""))
+        markdown_lines.append("")
+    
+    markdown_content = "\n".join(markdown_lines)
+    
+    # Export based on format
+    try:
+        if format == ExportFormatEnum.MD:
+            # Generate filename
+            now = datetime.now()
+            date_str = now.strftime("%Y%m%d")
+            time_str = now.strftime("%H%M")
+            filename = f"问股_{date_str}_{time_str}.md"
+            
+            reports_dir = Path(__file__).parent.parent.parent.parent / 'reports'
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            filepath = reports_dir / filename
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            
+            return FileResponse(
+                path=str(filepath),
+                media_type="text/markdown",
+                filename=filename
+            )
+        
+        elif format == ExportFormatEnum.DOCX:
+            filepath_str = ReportExportService.export_to_docx(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                filename=filepath.name
+            )
+        
+        elif format == ExportFormatEnum.RTF:
+            filepath_str = ReportExportService.export_to_rtf(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="application/rtf",
+                filename=filepath.name
+            )
+        
+        elif format == ExportFormatEnum.HTML:
+            filepath_str = ReportExportService.export_to_html(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="text/html",
+                filename=filepath.name
+            )
+        
+        elif format == ExportFormatEnum.PDF:
+            filepath_str = ReportExportService.export_to_pdf(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="application/pdf",
+                filename=filepath.name
+            )
+        
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    except Exception as e:
+        logger.error(f"Failed to export chat session: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "export_failed",
+                "message": f"Export failed: {str(e)}"
+            }
+        )

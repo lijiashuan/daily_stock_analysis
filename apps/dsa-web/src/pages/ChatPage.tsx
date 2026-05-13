@@ -13,7 +13,7 @@ import {
   type Message,
   type ProgressStep,
 } from '../stores/agentChatStore';
-import { downloadSession, formatSessionAsMarkdown } from '../utils/chatExport';
+import { formatSessionAsMarkdown, downloadSessionInFormat } from '../utils/chatExport';
 import type { ChatFollowUpContext } from '../utils/chatFollowUp';
 import {
   buildFollowUpPrompt,
@@ -654,31 +654,69 @@ const ChatPage: React.FC = () => {
             </h1>
             {messages.length > 0 && (
               <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-                <Tooltip content="导出会话为 Markdown 文件">
-                  <span className="inline-flex">
-                    <Button
-                      variant="action-primary"
-                      size="sm"
-                      onClick={() => downloadSession(messages)}
-                      aria-label="导出会话为 Markdown 文件"
-                    >
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
+                {/* Export dropdown */}
+                <div className="relative group">
+                  <Tooltip content={text.downloadReport}>
+                    <span className="inline-flex">
+                      <Button
+                        variant="action-primary"
+                        size="sm"
+                        aria-label="导出会话"
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                        />
-                      </svg>
-                      导出会话
-                    </Button>
-                  </span>
-                </Tooltip>
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                          />
+                        </svg>
+                        导出会话
+                      </Button>
+                    </span>
+                  </Tooltip>
+                  
+                  {/* Dropdown menu */}
+                  <div className="absolute right-0 mt-2 w-48 bg-card border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                    <div className="py-1">
+                      <button
+                        onClick={() => downloadSessionInFormat(messages, 'md', undefined, sessionId)}
+                        className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent"
+                      >
+                        {text.exportFormats.md}
+                      </button>
+                      <button
+                        onClick={() => downloadSessionInFormat(messages, 'pdf', undefined, sessionId)}
+                        className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent"
+                      >
+                        {text.exportFormats.pdf}
+                      </button>
+                      <button
+                        onClick={() => downloadSessionInFormat(messages, 'docx', undefined, sessionId)}
+                        className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent"
+                      >
+                        {text.exportFormats.docx}
+                      </button>
+                      <button
+                        onClick={() => downloadSessionInFormat(messages, 'html', undefined, sessionId)}
+                        className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent"
+                      >
+                        {text.exportFormats.html}
+                      </button>
+                      <button
+                        onClick={() => downloadSessionInFormat(messages, 'rtf', undefined, sessionId)}
+                        className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-accent"
+                      >
+                        {text.exportFormats.rtf}
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <Tooltip content="发送到已配置的通知机器人/邮箱">
                   <span className="inline-flex">
                     <Button
@@ -1036,9 +1074,9 @@ const ChatPage: React.FC = () => {
                   onClick={() => handleSend()}
                   disabled={!input.trim() || loading}
                   isLoading={loading}
-                  className="btn-primary flex-shrink-0"
+                  className="btn-primary flex-shrink-0 px-6"
                 >
-                  发送
+                  {loading ? '分析中' : '发送'}
                 </Button>
               </div>
             </div>

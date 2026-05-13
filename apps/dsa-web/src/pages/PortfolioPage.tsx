@@ -43,7 +43,8 @@ type FlatPosition = PortfolioPositionItem & {
 type PendingDelete =
   | { eventType: 'trade'; id: number; message: string }
   | { eventType: 'cash'; id: number; message: string }
-  | { eventType: 'corporate'; id: number; message: string };
+  | { eventType: 'corporate'; id: number; message: string }
+  | { eventType: 'account'; id: number; name: string; message: string };
 
 type FxRefreshFeedback = {
   tone: 'neutral' | 'success' | 'warning';
@@ -455,18 +456,53 @@ const PortfolioPage: React.FC = () => {
   const positionRows: FlatPosition[] = useMemo(() => {
     if (!snapshot) return [];
     const rows: FlatPosition[] = [];
-    for (const account of snapshot.accounts || []) {
+    
+    // Always merge positions by symbol, regardless of account selection
+    const mergedMap = new Map<string, FlatPosition>();
+    const filteredAccounts = selectedAccount === 'all' 
+      ? snapshot.accounts || []
+      : snapshot.accounts?.filter(a => a.accountId === selectedAccount) || [];
+    
+    for (const account of filteredAccounts) {
       for (const position of account.positions || []) {
-        rows.push({
-          ...position,
-          accountId: account.accountId,
-          accountName: account.accountName,
-        });
+        const key = `${position.symbol}-${position.market}`;
+        const existing = mergedMap.get(key);
+        if (existing) {
+          // Merge quantities and values
+          const totalQty = existing.quantity + position.quantity;
+          // Weighted average cost: (existing.avgCost * existing.quantity + position.avgCost * position.quantity) / totalQty
+          const weightedCost = totalQty > 0 
+            ? (existing.avgCost * existing.quantity + position.avgCost * position.quantity) / totalQty
+            : existing.avgCost;
+          const totalMv = (existing.marketValueBase || 0) + (position.marketValueBase || 0);
+          const totalPnl = (existing.unrealizedPnlBase || 0) + (position.unrealizedPnlBase || 0);
+          const totalPnlPct = existing.totalCost > 0 && position.totalCost > 0
+            ? (totalPnl / ((existing.totalCost || 0) + (position.totalCost || 0))) * 100
+            : existing.unrealizedPnlPct;
+          
+          mergedMap.set(key, {
+            ...position,
+            accountId: existing.accountId, // Keep first account for reference
+            accountName: selectedAccount === 'all' ? '汇总' : existing.accountName,
+            quantity: totalQty,
+            avgCost: weightedCost,
+            marketValueBase: totalMv,
+            unrealizedPnlBase: totalPnl,
+            unrealizedPnlPct: totalPnlPct,
+          });
+        } else {
+          mergedMap.set(key, {
+            ...position,
+            accountId: account.accountId,
+            accountName: account.accountName,
+          });
+        }
       }
     }
+    mergedMap.forEach((position) => rows.push(position));
     rows.sort((a, b) => Number(b.marketValueBase || 0) - Number(a.marketValueBase || 0));
     return rows;
-  }, [snapshot]);
+  }, [snapshot, selectedAccount]);
 
   const sectorPieData = useMemo(() => {
     const sectors = risk?.sectorConcentration?.topSectors || [];
@@ -614,11 +650,6 @@ const PortfolioPage: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!pendingDelete || deleteLoading) return;
-    if (!writableAccountId) {
-      setWriteWarning('请先在右上角选择具体账户，再进行删除修正。');
-      setPendingDelete(null);
-      return;
-    }
 
     const nextPage = currentEventCount === 1 && eventPage > 1 ? eventPage - 1 : eventPage;
     try {
@@ -628,14 +659,19 @@ const PortfolioPage: React.FC = () => {
         await portfolioApi.deleteTrade(pendingDelete.id);
       } else if (pendingDelete.eventType === 'cash') {
         await portfolioApi.deleteCashLedger(pendingDelete.id);
-      } else {
+      } else if (pendingDelete.eventType === 'corporate') {
         await portfolioApi.deleteCorporateAction(pendingDelete.id);
+      } else if (pendingDelete.eventType === 'account') {
+        await portfolioApi.deleteAccount(pendingDelete.id);
+        await loadAccounts();
+        if (selectedAccount === pendingDelete.id) {
+          setSelectedAccount('all');
+        }
       }
       setPendingDelete(null);
-      if (nextPage !== eventPage) {
-        setEventPage(nextPage);
+      if (pendingDelete.eventType !== 'account') {
+        await refreshPortfolioData(nextPage);
       }
-      await refreshPortfolioData(nextPage);
     } catch (err) {
       setError(getParsedApiError(err));
     } finally {
@@ -797,18 +833,39 @@ const PortfolioPage: React.FC = () => {
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_280px] gap-2 items-end">
               <div>
                 <p className="text-xs text-secondary mb-1">账户视图</p>
-                <select
-                  value={String(selectedAccount)}
-                  onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                  className={PORTFOLIO_SELECT_CLASS}
-                >
-                  <option value="all">全部账户</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name} (#{account.id})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={String(selectedAccount)}
+                    onChange={(e) => setSelectedAccount(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                    className={PORTFOLIO_SELECT_CLASS}
+                  >
+                    <option value="all">全部账户</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} (#{account.id})
+                      </option>
+                    ))}
+                  </select>
+                  {selectedAccount !== 'all' ? (
+                    <button
+                      type="button"
+                      className="btn-secondary !px-3 !text-xs shrink-0 border-red-500/30 text-red-400 hover:bg-red-500/10"
+                      onClick={() => {
+                        const acc = accounts.find((a) => a.id === selectedAccount);
+                        if (acc) {
+                          openDeleteDialog({
+                            eventType: 'account',
+                            id: acc.id,
+                            name: acc.name,
+                            message: `确认删除账户「${acc.name}」吗？该操作将同时删除该账户下的所有交易记录、资金流水和公司行为数据，且不可恢复。`,
+                          });
+                        }
+                      }}
+                    >
+                      删除账户
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div>
                 <p className="text-xs text-secondary mb-1">成本口径</p>
@@ -994,7 +1051,9 @@ const PortfolioPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead className="text-xs text-secondary border-b border-white/10">
                   <tr>
-                    <th className="text-left py-2 pr-2">账户</th>
+                    {selectedAccount === 'all' ? null : (
+                      <th className="text-left py-2 pr-2">账户</th>
+                    )}
                     <th className="text-left py-2 pr-2">代码</th>
                     <th className="text-right py-2 pr-2">数量</th>
                     <th className="text-right py-2 pr-2">均价</th>
@@ -1007,7 +1066,9 @@ const PortfolioPage: React.FC = () => {
                 <tbody>
                   {positionRows.map((row) => (
                     <tr key={`${row.accountId}-${row.symbol}-${row.market}`} className="border-b border-white/5">
-                      <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
+                      {selectedAccount === 'all' ? null : (
+                        <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
+                      )}
                       <td className="py-2 pr-2 font-mono text-foreground">{row.symbol}</td>
                       <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
                       <td className="py-2 pr-2 text-right">{row.avgCost.toFixed(4)}</td>
@@ -1241,12 +1302,24 @@ const PortfolioPage: React.FC = () => {
               />
             ) : null}
             {csvCommitResult ? (
-              <InlineAlert
-                variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
-                title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
-                message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
-                className="rounded-lg px-3 py-2 text-xs shadow-none"
-              />
+              <div className="space-y-2">
+                <InlineAlert
+                  variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
+                  title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
+                  message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
+                  className="rounded-lg px-3 py-2 text-xs shadow-none"
+                />
+                {csvCommitResult.failedCount > 0 && csvCommitResult.errors && csvCommitResult.errors.length > 0 && (
+                  <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs">
+                    <div className="font-semibold text-red-400 mb-1">失败详情（最多显示 20 条）：</div>
+                    <div className="max-h-32 overflow-auto space-y-1 text-red-300/80">
+                      {csvCommitResult.errors.map((err, idx) => (
+                        <div key={idx} className="font-mono">{err}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : null}
           </div>
         </Card>

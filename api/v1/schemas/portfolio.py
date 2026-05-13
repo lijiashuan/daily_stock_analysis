@@ -224,6 +224,7 @@ class PortfolioImportParseResponse(BaseModel):
     error_count: int
     records: List[PortfolioImportTradeItem] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+    skip_reasons: Dict[str, int] = Field(default_factory=dict)  # 新增：跳过原因统计
 
 
 class PortfolioImportCommitResponse(BaseModel):
