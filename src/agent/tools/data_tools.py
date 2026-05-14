@@ -613,6 +613,249 @@ get_portfolio_snapshot_tool = ToolDefinition(
 )
 
 
+
+# ============================================================
+# get_account_recent_trades
+# ============================================================
+
+def _handle_get_account_recent_trades(
+    account_id: Optional[int] = None,
+    days: int = 7,
+    symbol: Optional[str] = None,
+) -> dict:
+    """Get recent trade records from portfolio."""
+    try:
+        from src.services.portfolio_service import PortfolioService
+        from datetime import date, timedelta
+        
+        # Normalize days
+        if days < 1:
+            days = 1
+        elif days > 90:
+            days = 90
+        
+        today = date.today()
+        date_from = today - timedelta(days=days)
+        
+        portfolio_service = PortfolioService()
+        
+        # Query trade events
+        result = portfolio_service.list_trade_events(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=today,
+            symbol=symbol,
+            page=1,
+            page_size=100
+        )
+        
+        trades = result.get("items", [])
+        
+        if not trades:
+            return {
+                "status": "ok",
+                "account_id": account_id,
+                "date_range": {
+                    "from": date_from.isoformat(),
+                    "to": today.isoformat()
+                },
+                "trade_count": 0,
+                "message": "No trade records found in the specified period"
+            }
+        
+        # Format trades for LLM consumption
+        formatted_trades = []
+        for trade in trades:
+            formatted_trades.append({
+                "trade_id": trade.get("id"),
+                "trade_date": trade.get("trade_date"),
+                "symbol": trade.get("symbol"),
+                "side": trade.get("side"),  # buy/sell
+                "quantity": trade.get("quantity"),
+                "price": trade.get("price"),
+                "amount": trade.get("quantity", 0) * trade.get("price", 0),
+                "fee": trade.get("fee", 0),
+                "tax": trade.get("tax", 0),
+                "note": trade.get("note")
+            })
+        
+        return {
+            "status": "ok",
+            "account_id": account_id,
+            "date_range": {
+                "from": date_from.isoformat(),
+                "to": today.isoformat()
+            },
+            "trade_count": len(formatted_trades),
+            "trades": formatted_trades,
+            "summary": {
+                "total_buy": sum(1 for t in formatted_trades if t["side"] == "buy"),
+                "total_sell": sum(1 for t in formatted_trades if t["side"] == "sell"),
+                "unique_stocks": len(set(t["symbol"] for t in formatted_trades))
+            }
+        }
+        
+    except Exception as exc:
+        logger.warning("get_account_recent_trades failed: %s", exc)
+        return {
+            "status": "failed",
+            "error": f"Failed to fetch trade records: {exc}"
+        }
+
+
+get_account_recent_trades_tool = ToolDefinition(
+    name="get_account_recent_trades",
+    description="Get recent trade transaction records from portfolio account. "
+                "Returns detailed buy/sell transactions with date, stock, quantity, price. "
+                "Use this to check TODAY'S trading activity that hasn't been reflected in snapshots yet.",
+    parameters=[
+        ToolParameter(
+            name="account_id",
+            type="integer",
+            description="Optional account id; omit to query all active accounts.",
+            required=False,
+            default=None,
+        ),
+        ToolParameter(
+            name="days",
+            type="integer",
+            description="Number of recent days to query (default: 7, max: 90).",
+            required=False,
+            default=7,
+        ),
+        ToolParameter(
+            name="symbol",
+            type="string",
+            description="Optional stock symbol filter, e.g., '600519'.",
+            required=False,
+            default=None,
+        ),
+    ],
+    handler=_handle_get_account_recent_trades,
+    category="data",
+)
+
+
+# ============================================================
+# get_current_positions
+# ============================================================
+
+def _handle_get_current_positions(
+    account_id: Optional[int] = None,
+    cost_method: str = "fifo",
+    include_today_trades: bool = True,
+) -> dict:
+    """Get current portfolio positions with latest available prices and today's trades."""
+    method = (cost_method or "fifo").strip().lower()
+    if method not in {"fifo", "avg"}:
+        return {"error": "cost_method must be fifo or avg"}
+
+    try:
+        from src.services.portfolio_service import PortfolioService
+        from datetime import date
+    except Exception as exc:
+        logger.warning("get_current_positions unavailable: %s", exc)
+        return {"status": "not_supported", "error": f"portfolio module unavailable: {exc}"}
+
+    try:
+        portfolio_service = PortfolioService()
+        today = date.today()
+        
+        # Get snapshot for today - this includes all trades recorded up to today
+        snapshot = portfolio_service.get_portfolio_snapshot(
+            account_id=account_id,
+            as_of=today,
+            cost_method=method,
+        )
+        
+        # Extract positions from all accounts
+        all_positions = []
+        for account in snapshot.get("accounts", []):
+            positions = account.get("positions", [])
+            for pos in positions:
+                pos_with_account = {
+                    **pos,
+                    "account_id": account.get("account_id"),
+                    "account_name": account.get("account_name"),
+                }
+                all_positions.append(pos_with_account)
+        
+        # If requested, also fetch today's trades to show what was executed
+        today_trades = []
+        if include_today_trades:
+            try:
+                trades_result = portfolio_service.list_trade_events(
+                    account_id=account_id,
+                    date_from=today,
+                    date_to=today,
+                    page=1,
+                    page_size=100
+                )
+                today_trades = trades_result.get("items", [])
+            except Exception as trade_exc:
+                logger.warning("Failed to fetch today's trades: %s", trade_exc)
+        
+        return {
+            "status": "ok",
+            "as_of": today.isoformat(),
+            "cost_method": method,
+            "snapshot_summary": {
+                "total_equity": snapshot.get("total_equity"),
+                "total_market_value": snapshot.get("total_market_value"),
+                "total_cash": snapshot.get("total_cash"),
+                "realized_pnl": snapshot.get("realized_pnl"),
+                "unrealized_pnl": snapshot.get("unrealized_pnl"),
+                "account_count": snapshot.get("account_count"),
+            },
+            "positions": all_positions,
+            "position_count": len(all_positions),
+            "today_trades": today_trades,
+            "today_trade_count": len(today_trades),
+            "note": (
+                "Positions reflect all trades recorded up to today. "
+                "Prices may use yesterday's close (history_close) if today's market data is not yet available. "
+                "Check price_source field: 'realtime_quote' means live price, 'history_close' means last available close."
+            )
+        }
+    except Exception as exc:
+        logger.warning("get_current_positions failed: %s", exc)
+        return {"status": "failed", "error": f"failed to fetch current positions: {exc}"}
+
+
+get_current_positions_tool = ToolDefinition(
+    name="get_current_positions",
+    description="Get current portfolio positions with latest available prices. "
+                "Includes all trades recorded up to today. Also returns today's trade executions if any. "
+                "This is the authoritative source for current holdings after manual trade entry.",
+    parameters=[
+        ToolParameter(
+            name="account_id",
+            type="integer",
+            description="Optional account id; omit to query all active accounts.",
+            required=False,
+            default=None,
+        ),
+        ToolParameter(
+            name="cost_method",
+            type="string",
+            description="Cost calculation method: fifo or avg (default: fifo).",
+            required=False,
+            default="fifo",
+            enum=["fifo", "avg"],
+        ),
+        ToolParameter(
+            name="include_today_trades",
+            type="boolean",
+            description="Whether to include today's trade executions (default: true).",
+            required=False,
+            default=True,
+        ),
+    ],
+    handler=_handle_get_current_positions,
+    category="data",
+)
+
+
 # ============================================================
 # Export all data tools
 # ============================================================
@@ -624,6 +867,8 @@ ALL_DATA_TOOLS = [
     get_analysis_context_tool,
     get_stock_info_tool,
     get_portfolio_snapshot_tool,
+    get_account_recent_trades_tool,
+    get_current_positions_tool,
 ]
 
 
