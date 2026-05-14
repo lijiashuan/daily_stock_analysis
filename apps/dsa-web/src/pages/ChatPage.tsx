@@ -64,6 +64,8 @@ const ChatPage: React.FC = () => {
   } | null>(null);
   const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [exportingMessageId, setExportingMessageId] = useState<string | null>(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState<string | null>(null);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -169,6 +171,21 @@ const ChatPage: React.FC = () => {
       pendingScrollBehaviorRef.current = 'smooth';
     }
   }, [loading]);
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.chat-message-actions')) {
+        setExportMenuOpen(null);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [exportMenuOpen]);
 
   useEffect(() => {
     clearCompletionBadge();
@@ -371,20 +388,61 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const downloadMessageAsMarkdown = useCallback((msg: Message) => {
-    const skillLabel = getMessageSkillLabel(msg);
-    const heading = msg.role === 'user' ? '# 用户消息' : `# AI 回复${skillLabel ? ` · ${skillLabel}` : ''}`;
-    const content = [heading, '', msg.content].join('\n');
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${msg.role === 'user' ? 'user' : 'assistant'}-message-${msg.id}.md`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  }, []);
+  // Legacy function - kept for reference but no longer used
+  // const downloadMessageAsMarkdown = useCallback((msg: Message) => {
+  //   const skillLabel = getMessageSkillLabel(msg);
+  //   const heading = msg.role === 'user' ? '# 用户消息' : `# AI 回复${skillLabel ? ` · ${skillLabel}` : ''}`;
+  //   const content = [heading, '', msg.content].join('\n');
+  //   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  //   const url = URL.createObjectURL(blob);
+  //   const anchor = document.createElement('a');
+  //   anchor.href = url;
+  //   anchor.download = `${msg.role === 'user' ? 'user' : 'assistant'}-message-${msg.id}.md`;
+  //   document.body.appendChild(anchor);
+  //   anchor.click();
+  //   document.body.removeChild(anchor);
+  //   URL.revokeObjectURL(url);
+  // }, []);
+
+  const downloadMessageInFormat = useCallback(async (msg: Message, format: 'md' | 'docx' | 'rtf' | 'html' | 'pdf') => {
+    // For single message export, use the new backend API endpoint
+    if (!sessionId) {
+      alert('无法导出：没有可用的会话 ID');
+      return;
+    }
+    
+    // Generate filename
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const timeStr = pad(now.getHours()) + pad(now.getMinutes());
+    const roleLabel = msg.role === 'user' ? '用户' : 'AI';
+    const filename = `${roleLabel}_消息_${dateStr}_${timeStr}.${format}`;
+    
+    try {
+      setExportingMessageId(msg.id);
+      setExportMenuOpen(null);
+      
+      // Call the new backend API for single message export
+      const { agentApi } = await import('../api/agent');
+      const blob = await agentApi.exportChatMessage(sessionId, msg.id, format);
+      
+      // Trigger download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert(`导出失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setExportingMessageId(null);
+    }
+  }, [sessionId]);
 
   const getCurrentStage = (steps: ProgressStep[]): string => {
     if (steps.length === 0) return '正在连接...';
@@ -901,14 +959,54 @@ const ChatPage: React.FC = () => {
                           >
                             {copiedMessages.has(msg.id) ? text.copied : text.copy}
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => downloadMessageAsMarkdown(msg)}
-                            className="chat-copy-btn"
-                            aria-label="导出此条消息为 Markdown"
-                          >
-                            导出
-                          </button>
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setExportMenuOpen(exportMenuOpen === msg.id ? null : msg.id)}
+                              className="chat-copy-btn"
+                              disabled={exportingMessageId === msg.id}
+                              aria-label="导出此条消息"
+                              aria-expanded={exportMenuOpen === msg.id}
+                            >
+                              {exportingMessageId === msg.id ? '导出中...' : '导出'}
+                            </button>
+                            {exportMenuOpen === msg.id && (
+                              <div className="absolute right-0 top-full mt-1 z-30 min-w-[140px] rounded-lg border border-border/50 bg-card shadow-soft-card animate-fade-in">
+                                <div className="p-1">
+                                  <button
+                                    onClick={() => downloadMessageInFormat(msg, 'md')}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent rounded"
+                                  >
+                                    Markdown
+                                  </button>
+                                  <button
+                                    onClick={() => downloadMessageInFormat(msg, 'docx')}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent rounded"
+                                  >
+                                    Word (DOCX)
+                                  </button>
+                                  <button
+                                    onClick={() => downloadMessageInFormat(msg, 'pdf')}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent rounded"
+                                  >
+                                    PDF
+                                  </button>
+                                  <button
+                                    onClick={() => downloadMessageInFormat(msg, 'html')}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent rounded"
+                                  >
+                                    HTML
+                                  </button>
+                                  <button
+                                    onClick={() => downloadMessageInFormat(msg, 'rtf')}
+                                    className="w-full text-left px-3 py-1.5 text-xs text-foreground hover:bg-accent rounded"
+                                  >
+                                    RTF
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                         <div className="chat-prose pr-20 sm:pr-24">
                           <Markdown remarkPlugins={[remarkGfm]}>

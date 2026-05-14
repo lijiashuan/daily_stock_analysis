@@ -109,6 +109,32 @@ export const agentApi = {
     
     return response.data;
   },
+  /**
+   * Export single message from chat session in specified format
+   */
+  exportChatMessage: async (sessionId: string, messageId: string, format: 'md' | 'docx' | 'rtf' | 'html' | 'pdf' = 'md'): Promise<Blob> => {
+    const response = await apiClient.get(`/api/v1/agent/chat/sessions/${sessionId}/export-message`, {
+      params: { message_id: messageId, format },
+      responseType: 'blob',
+      validateStatus: (status) => status < 500,
+    });
+    
+    // Check if response is an error (JSON instead of file)
+    if (response.headers['content-type']?.includes('application/json')) {
+      const text = await response.data.text();
+      try {
+        const error = JSON.parse(text);
+        throw new Error(error.detail?.message || error.detail || '导出失败');
+      } catch (e) {
+        if (e instanceof Error) {
+          throw e;
+        }
+        throw new Error('导出失败：未知错误');
+      }
+    }
+    
+    return response.data;
+  },
   async chatStream(
     payload: ChatStreamRequest,
     options?: ChatStreamOptions,

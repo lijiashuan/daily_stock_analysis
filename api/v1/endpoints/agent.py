@@ -587,3 +587,133 @@ async def export_chat_session(
                 "message": f"Export failed: {str(e)}"
             }
         )
+
+
+@router.get(
+    "/chat/sessions/{session_id}/export-message",
+    summary="Export single message from chat session",
+    description="Export a single message in various formats (md, docx, pdf, html, rtf)",
+)
+async def export_chat_message(
+    session_id: str,
+    message_id: str = Query(..., description="ID of the message to export"),
+    format: ExportFormatEnum = Query(ExportFormatEnum.MD, description="Export format"),
+) -> Any:
+    """
+    Export a single message from a chat session.
+    
+    This endpoint allows exporting individual messages in various formats.
+    The message content is converted using ReportExportService for consistent formatting.
+    """
+    from fastapi.responses import FileResponse, Response
+    from pathlib import Path
+    from src.storage import get_db
+    from src.services.report_export_service import ReportExportService
+    from datetime import datetime
+    
+    try:
+        # Get chat messages from database
+        db = get_db()
+        messages = db.get_conversation_messages(session_id, limit=1000)
+        
+        if not messages:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "session_not_found",
+                    "message": f"Session {session_id} not found or empty"
+                }
+            )
+        
+        # Find the specific message
+        target_message = None
+        for msg in messages:
+            if msg.get('id') == message_id:
+                target_message = msg
+                break
+        
+        if not target_message:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "message_not_found",
+                    "message": f"Message {message_id} not found in session {session_id}"
+                }
+            )
+        
+        # Generate markdown content for the single message
+        role_label = "用户" if target_message.get("role") == "user" else "AI"
+        
+        markdown_content = f"""# 问股会话 - 单条消息导出
+
+## {role_label}
+
+{target_message.get("content", "")}
+"""
+        
+        # Generate filename
+        now = datetime.now()
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M")
+        filename_base = f"{role_label}_消息_{date_str}_{time_str}"
+        
+        # Export based on format
+        if format == ExportFormatEnum.MD:
+            return Response(
+                content=markdown_content,
+                media_type="text/markdown;charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename={filename_base}.md"
+                }
+            )
+        
+        elif format == ExportFormatEnum.DOCX:
+            filepath_str = ReportExportService.export_to_docx(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                filename=f"{filename_base}.docx"
+            )
+        
+        elif format == ExportFormatEnum.RTF:
+            filepath_str = ReportExportService.export_to_rtf(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="application/rtf",
+                filename=f"{filename_base}.rtf"
+            )
+        
+        elif format == ExportFormatEnum.HTML:
+            filepath_str = ReportExportService.export_to_html(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="text/html",
+                filename=f"{filename_base}.html"
+            )
+        
+        elif format == ExportFormatEnum.PDF:
+            filepath_str = ReportExportService.export_to_pdf(markdown_content)
+            filepath = Path(filepath_str)
+            return FileResponse(
+                path=str(filepath),
+                media_type="application/pdf",
+                filename=f"{filename_base}.pdf"
+            )
+        
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export chat message: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "export_failed",
+                "message": f"Export failed: {str(e)}"
+            }
+        )
