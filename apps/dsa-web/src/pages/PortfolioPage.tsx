@@ -231,6 +231,7 @@ const PortfolioPage: React.FC = () => {
   const [eventPage, setEventPage] = useState(1);
   const [eventTotal, setEventTotal] = useState(0);
   const [eventLoading, setEventLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [tradeEvents, setTradeEvents] = useState<PortfolioTradeListItem[]>([]);
   const [cashEvents, setCashEvents] = useState<PortfolioCashLedgerListItem[]>([]);
   const [corporateEvents, setCorporateEvents] = useState<PortfolioCorporateActionListItem[]>([]);
@@ -724,6 +725,58 @@ const PortfolioPage: React.FC = () => {
   const handleRefresh = async () => {
     await Promise.all([loadAccounts(), loadSnapshotAndRisk(), loadEvents(), loadBrokers()]);
   };
+
+  const handleExport = useCallback(async () => {
+    if (exportLoading) return; // Prevent multiple clicks
+    
+    try {
+      setExportLoading(true);
+      let blob: Blob;
+      let filename: string;
+
+      if (eventType === 'trade') {
+        blob = await portfolioApi.exportTrades({
+          accountId: queryAccountId,
+          dateFrom: eventDateFrom || undefined,
+          dateTo: eventDateTo || undefined,
+          symbol: eventSymbol || undefined,
+          side: eventSide || undefined,
+        });
+        filename = `trades_export_${eventDateFrom || 'all'}_to_${eventDateTo || 'all'}.csv`;
+      } else if (eventType === 'cash') {
+        blob = await portfolioApi.exportCashLedger({
+          accountId: queryAccountId,
+          dateFrom: eventDateFrom || undefined,
+          dateTo: eventDateTo || undefined,
+          direction: eventDirection || undefined,
+        });
+        filename = `cash_ledger_export_${eventDateFrom || 'all'}_to_${eventDateTo || 'all'}.csv`;
+      } else {
+        blob = await portfolioApi.exportCorporateActions({
+          accountId: queryAccountId,
+          dateFrom: eventDateFrom || undefined,
+          dateTo: eventDateTo || undefined,
+          symbol: eventSymbol || undefined,
+          actionType: eventActionType || undefined,
+        });
+        filename = `corporate_actions_export_${eventDateFrom || 'all'}_to_${eventDateTo || 'all'}.csv`;
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(getParsedApiError(err));
+    } finally {
+      setExportLoading(false);
+    }
+  }, [eventType, queryAccountId, eventDateFrom, eventDateTo, eventSymbol, eventSide, eventDirection, eventActionType, exportLoading]);
 
   const reloadSnapshotAndRiskForScope = useCallback(async (
     requestedViewKey: string,
@@ -1346,7 +1399,7 @@ const PortfolioPage: React.FC = () => {
         <Card padding="md">
           <h3 className="text-sm font-semibold text-foreground mb-3">事件记录</h3>
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <select className={PORTFOLIO_SELECT_CLASS} value={eventType} onChange={(e) => setEventType(e.target.value as EventType)}>
                 <option value="trade">交易流水</option>
                 <option value="cash">资金流水</option>
@@ -1354,6 +1407,9 @@ const PortfolioPage: React.FC = () => {
               </select>
               <button type="button" className="btn-secondary text-sm" onClick={() => void loadEvents()} disabled={eventLoading}>
                 {eventLoading ? '加载中...' : '刷新流水'}
+              </button>
+              <button type="button" className="btn-secondary text-sm" onClick={() => void handleExport()} disabled={exportLoading}>
+                {exportLoading ? '导出中...' : '导出 CSV'}
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2">

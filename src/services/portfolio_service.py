@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 from collections import defaultdict
@@ -153,6 +155,226 @@ class PortfolioService:
 
     def deactivate_account(self, account_id: int) -> bool:
         return self.repo.deactivate_account(account_id)
+
+    # ------------------------------------------------------------------
+    # Export functionality
+    # ------------------------------------------------------------------
+    def export_trades_to_csv(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        symbol: Optional[str] = None,
+        side: Optional[str] = None,
+    ) -> str:
+        """Export trade records to CSV format.
+        
+        Args:
+            account_id: Filter by account ID (optional)
+            date_from: Filter by start date (optional)
+            date_to: Filter by end date (optional)
+            symbol: Filter by stock symbol (optional)
+            side: Filter by trade side - buy/sell (optional)
+            
+        Returns:
+            CSV formatted string with BOM for Excel compatibility
+        """
+        # Fetch all trades by paginating through results
+        all_trades = []
+        page = 1
+        page_size = 100  # Maximum allowed page size
+        
+        while True:
+            result = self.list_trade_events(
+                account_id=account_id,
+                date_from=date_from,
+                date_to=date_to,
+                symbol=symbol,
+                side=side,
+                page=page,
+                page_size=page_size,
+            )
+            items = result.get('items', [])
+            all_trades.extend(items)
+            
+            # Check if we have fetched all items
+            total = result.get('total', 0)
+            if len(all_trades) >= total or len(items) == 0:
+                break
+            page += 1
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'ID', 'Account ID', 'Symbol', 'Market', 'Currency',
+            'Trade Date', 'Side', 'Quantity', 'Price', 'Fee', 'Tax',
+            'Trade UID', 'Note', 'Created At'
+        ])
+        
+        # Write data rows
+        for item in all_trades:
+            writer.writerow([
+                item.get('id', ''),
+                item.get('account_id', ''),
+                item.get('symbol', ''),
+                item.get('market', ''),
+                item.get('currency', ''),
+                item.get('trade_date', ''),
+                item.get('side', ''),
+                item.get('quantity', ''),
+                item.get('price', ''),
+                item.get('fee', 0),
+                item.get('tax', 0),
+                item.get('trade_uid', ''),
+                item.get('note', ''),
+                item.get('created_at', ''),
+            ])
+        
+        # Add BOM for Excel compatibility with Chinese characters
+        return '\ufeff' + output.getvalue()
+
+    def export_cash_ledger_to_csv(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        direction: Optional[str] = None,
+    ) -> str:
+        """Export cash ledger records to CSV format.
+        
+        Args:
+            account_id: Filter by account ID (optional)
+            date_from: Filter by start date (optional)
+            date_to: Filter by end date (optional)
+            direction: Filter by direction - in/out (optional)
+            
+        Returns:
+            CSV formatted string with BOM for Excel compatibility
+        """
+        # Fetch all cash ledger entries by paginating through results
+        all_entries = []
+        page = 1
+        page_size = 100
+        
+        while True:
+            result = self.list_cash_ledger_events(
+                account_id=account_id,
+                date_from=date_from,
+                date_to=date_to,
+                direction=direction,
+                page=page,
+                page_size=page_size,
+            )
+            items = result.get('items', [])
+            all_entries.extend(items)
+            
+            # Check if we have fetched all items
+            total = result.get('total', 0)
+            if len(all_entries) >= total or len(items) == 0:
+                break
+            page += 1
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'ID', 'Account ID', 'Event Date', 'Direction',
+            'Amount', 'Currency', 'Note', 'Created At'
+        ])
+        
+        # Write data rows
+        for item in all_entries:
+            writer.writerow([
+                item.get('id', ''),
+                item.get('account_id', ''),
+                item.get('event_date', ''),
+                item.get('direction', ''),
+                item.get('amount', ''),
+                item.get('currency', ''),
+                item.get('note', ''),
+                item.get('created_at', ''),
+            ])
+        
+        return '\ufeff' + output.getvalue()
+
+    def export_corporate_actions_to_csv(
+        self,
+        *,
+        account_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        symbol: Optional[str] = None,
+        action_type: Optional[str] = None,
+    ) -> str:
+        """Export corporate action records to CSV format.
+        
+        Args:
+            account_id: Filter by account ID (optional)
+            date_from: Filter by start date (optional)
+            date_to: Filter by end date (optional)
+            symbol: Filter by stock symbol (optional)
+            action_type: Filter by action type - cash_dividend/split_adjustment (optional)
+            
+        Returns:
+            CSV formatted string with BOM for Excel compatibility
+        """
+        # Fetch all corporate actions by paginating through results
+        all_actions = []
+        page = 1
+        page_size = 100
+        
+        while True:
+            result = self.list_corporate_action_events(
+                account_id=account_id,
+                date_from=date_from,
+                date_to=date_to,
+                symbol=symbol,
+                action_type=action_type,
+                page=page,
+                page_size=page_size,
+            )
+            items = result.get('items', [])
+            all_actions.extend(items)
+            
+            # Check if we have fetched all items
+            total = result.get('total', 0)
+            if len(all_actions) >= total or len(items) == 0:
+                break
+            page += 1
+        
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'ID', 'Account ID', 'Symbol', 'Market', 'Currency',
+            'Effective Date', 'Action Type', 'Cash Dividend Per Share',
+            'Split Ratio', 'Note', 'Created At'
+        ])
+        
+        # Write data rows
+        for item in all_actions:
+            action_type_display = '现金分红' if item.get('action_type') == 'cash_dividend' else '拆并股调整'
+            writer.writerow([
+                item.get('id', ''),
+                item.get('account_id', ''),
+                item.get('symbol', ''),
+                item.get('market', ''),
+                item.get('currency', ''),
+                item.get('effective_date', ''),
+                action_type_display,
+                item.get('cash_dividend_per_share', ''),
+                item.get('split_ratio', ''),
+                item.get('note', ''),
+                item.get('created_at', ''),
+            ])
+        
+        return '\ufeff' + output.getvalue()
 
     # ------------------------------------------------------------------
     # Event writes

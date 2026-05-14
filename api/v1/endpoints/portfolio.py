@@ -7,7 +7,7 @@ import logging
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Response
 
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.portfolio import (
@@ -584,3 +584,106 @@ def get_risk_report(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Get risk report failed", exc)
+
+
+@router.get(
+    "/exports/trades",
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Export trade records to CSV",
+)
+def export_trades(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    date_from: Optional[date] = Query(None, description="Trade date from"),
+    date_to: Optional[date] = Query(None, description="Trade date to"),
+    symbol: Optional[str] = Query(None, description="Optional stock symbol filter"),
+    side: Optional[str] = Query(None, description="Optional side filter: buy/sell"),
+) -> Response:
+    """Export trade records to CSV format."""
+    service = PortfolioService()
+    try:
+        csv_content = service.export_trades_to_csv(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            symbol=symbol,
+            side=side,
+        )
+        return Response(
+            content=csv_content,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="trades_export.csv"'
+            },
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Export trades failed", exc)
+
+
+@router.get(
+    "/exports/cash-ledger",
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Export cash ledger records to CSV",
+)
+def export_cash_ledger(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    date_from: Optional[date] = Query(None, description="Cash event date from"),
+    date_to: Optional[date] = Query(None, description="Cash event date to"),
+    direction: Optional[str] = Query(None, description="Optional direction filter: in/out"),
+) -> Response:
+    """Export cash ledger records to CSV format."""
+    service = PortfolioService()
+    try:
+        csv_content = service.export_cash_ledger_to_csv(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            direction=direction,
+        )
+        return Response(
+            content=csv_content,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="cash_ledger_export.csv"'
+            },
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Export cash ledger failed", exc)
+
+
+@router.get(
+    "/exports/corporate-actions",
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Export corporate action records to CSV",
+)
+def export_corporate_actions(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+    date_from: Optional[date] = Query(None, description="Corporate action effective date from"),
+    date_to: Optional[date] = Query(None, description="Corporate action effective date to"),
+    symbol: Optional[str] = Query(None, description="Optional stock symbol filter"),
+    action_type: Optional[str] = Query(None, description="Optional action type filter"),
+) -> Response:
+    """Export corporate action records to CSV format."""
+    service = PortfolioService()
+    try:
+        csv_content = service.export_corporate_actions_to_csv(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            symbol=symbol,
+            action_type=action_type,
+        )
+        return Response(
+            content=csv_content,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="corporate_actions_export.csv"'
+            },
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Export corporate actions failed", exc)

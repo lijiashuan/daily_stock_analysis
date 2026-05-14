@@ -268,4 +268,46 @@ export const portfolioApi = {
     });
     return toCamelCase<PortfolioImportCommitResponse>(response.data);
   },
+
+  async exportTrades(query: TradeListQuery = {}): Promise<Blob> {
+    const params = buildEventParams(query);
+    if (query.symbol) {
+      params.symbol = query.symbol;
+    }
+    if (query.side) {
+      params.side = query.side;
+    }
+    const response = await apiClient.get('/api/v1/portfolio/exports/trades', {
+      params,
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  },
+
+  async exportCashLedger(query: CashListQuery = {}): Promise<Blob> {
+    const params = buildEventParams(query);
+    if (query.direction) {
+      params.direction = query.direction;
+    }
+    const response = await apiClient.get('/api/v1/portfolio/exports/cash-ledger', {
+      params,
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  },
+
+  async exportCorporateActions(query: CorporateListQuery = {}): Promise<Blob> {
+    const params = buildEventParams(query);
+    if (query.symbol) {
+      params.symbol = query.symbol;
+    }
+    if (query.actionType) {
+      params.action_type = query.actionType;
+    }
+    const response = await apiClient.get('/api/v1/portfolio/exports/corporate-actions', {
+      params,
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  },
 };
