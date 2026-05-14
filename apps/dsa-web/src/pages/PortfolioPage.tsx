@@ -476,6 +476,7 @@ const PortfolioPage: React.FC = () => {
             : existing.avgCost;
           const totalMv = (existing.marketValueBase || 0) + (position.marketValueBase || 0);
           const totalPnl = (existing.unrealizedPnlBase || 0) + (position.unrealizedPnlBase || 0);
+          const totalRealizedPnl = ((existing as any).realizedPnlBase || 0) + ((position as any).realizedPnlBase || 0);
           const totalPnlPct = existing.totalCost > 0 && position.totalCost > 0
             ? (totalPnl / ((existing.totalCost || 0) + (position.totalCost || 0))) * 100
             : existing.unrealizedPnlPct;
@@ -489,6 +490,9 @@ const PortfolioPage: React.FC = () => {
             marketValueBase: totalMv,
             unrealizedPnlBase: totalPnl,
             unrealizedPnlPct: totalPnlPct,
+            realizedPnlBase: totalRealizedPnl,
+            // Keep stock name if available, use the first non-empty one
+            stockName: (existing as any).stockName || (position as any).stockName || undefined,
           });
         } else {
           mergedMap.set(key, {
@@ -1054,12 +1058,13 @@ const PortfolioPage: React.FC = () => {
                     {selectedAccount === 'all' ? null : (
                       <th className="text-left py-2 pr-2">账户</th>
                     )}
-                    <th className="text-left py-2 pr-2">代码</th>
+                    <th className="text-left py-2 pr-2">股票</th>
                     <th className="text-right py-2 pr-2">数量</th>
                     <th className="text-right py-2 pr-2">均价</th>
                     <th className="text-right py-2 pr-2">现价</th>
                     <th className="text-right py-2 pr-2">市值</th>
-                    <th className="text-right py-2">未实现盈亏</th>
+                    <th className="text-right py-2 pr-2">未实现盈亏</th>
+                    <th className="text-right py-2 pr-2">已实现盈亏</th>
                     <th className="text-right py-2">收益率</th>
                   </tr>
                 </thead>
@@ -1069,7 +1074,10 @@ const PortfolioPage: React.FC = () => {
                       {selectedAccount === 'all' ? null : (
                         <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
                       )}
-                      <td className="py-2 pr-2 font-mono text-foreground">{row.symbol}</td>
+                      <td className="py-2 pr-2">
+                        <div className="text-foreground">{(row as any).stockName || row.symbol}</div>
+                        {(row as any).stockName && <div className="text-[11px] text-secondary font-mono">{row.symbol}</div>}
+                      </td>
                       <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
                       <td className="py-2 pr-2 text-right">{row.avgCost.toFixed(4)}</td>
                       <td className="py-2 pr-2 text-right">
@@ -1080,7 +1088,7 @@ const PortfolioPage: React.FC = () => {
                       </td>
                       <td className="py-2 pr-2 text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
                       <td
-                        className={`py-2 text-right ${
+                        className={`py-2 pr-2 text-right ${
                           hasPositionPrice(row)
                             ? row.unrealizedPnlBase >= 0
                               ? 'text-success'
@@ -1089,6 +1097,17 @@ const PortfolioPage: React.FC = () => {
                         }`}
                       >
                         {formatPositionMoney(row.unrealizedPnlBase, row)}
+                      </td>
+                      <td
+                        className={`py-2 pr-2 text-right ${
+                          (row as any).realizedPnlBase !== null && (row as any).realizedPnlBase !== undefined
+                            ? (row as any).realizedPnlBase >= 0
+                              ? 'text-success'
+                              : 'text-danger'
+                            : 'text-secondary'
+                        }`}
+                      >
+                        {formatPositionMoney((row as any).realizedPnlBase || 0, { ...row, priceAvailable: true })}
                       </td>
                       <td
                         className={`py-2 text-right ${
@@ -1112,16 +1131,16 @@ const PortfolioPage: React.FC = () => {
         <Card padding="md">
           <h2 className="text-sm font-semibold text-foreground mb-3">{concentrationMode === 'sector' ? '行业集中度分布' : '行业数据暂不可用，当前展示个股集中度'}</h2>
           {concentrationPieData.length > 0 ? (
-            <div className="h-64">
+            <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}>
+                  <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70}>
                     {concentrationPieData.map((entry, index) => (
                       <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
-                  <Legend />
+                  <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: '12px' }} />
                 </PieChart>
               </ResponsiveContainer>
             </div>

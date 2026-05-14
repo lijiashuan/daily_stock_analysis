@@ -757,6 +757,9 @@ class PortfolioService:
         taxes_total_base = 0.0
         realized_pnl_base = 0.0
         fx_stale = False
+        
+        # Track realized PnL per symbol for position-level display
+        symbol_realized_pnl: Dict[Tuple[str, str, str], float] = defaultdict(float)
 
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
@@ -832,6 +835,8 @@ class PortfolioService:
                         as_of_date=event_date,
                     )
                     realized_pnl_base += realized_base
+                    # Track per-symbol realized PnL
+                    symbol_realized_pnl[key] += realized_base
                     fx_stale = fx_stale or stale_realized
                 else:
                     raise ValueError(f"Unsupported trade side: {event.side}")
@@ -894,6 +899,7 @@ class PortfolioService:
             cost_method=cost_method,
             fifo_lots=fifo_lots,
             avg_state=avg_state,
+            symbol_realized_pnl=symbol_realized_pnl,
         )
         fx_stale = fx_stale or stale_pos
 
@@ -954,6 +960,7 @@ class PortfolioService:
         cost_method: str,
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]],
         avg_state: Dict[Tuple[str, str, str], _AvgState],
+        symbol_realized_pnl: Dict[Tuple[str, str, str], float],
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float, float, bool]:
         position_rows: List[Dict[str, Any]] = []
         lot_rows: List[Dict[str, Any]] = []
@@ -999,6 +1006,9 @@ class PortfolioService:
 
             price_info = self._resolve_position_price(symbol=symbol, as_of_date=as_of_date)
             last_price = price_info.price
+            
+            # 获取股票名称
+            stock_name = self._fetch_stock_name(symbol=symbol)
 
             if price_info.is_available:
                 local_market_value = qty * float(last_price)
@@ -1037,12 +1047,14 @@ class PortfolioService:
                     "market_value_base": round(market_base, 8),
                     "unrealized_pnl_base": round(unrealized_base, 8),
                     "unrealized_pnl_pct": round(unrealized_pct, 8) if unrealized_pct is not None else None,
+                    "realized_pnl_base": round(symbol_realized_pnl.get(key, 0.0), 8),
                     "valuation_currency": account.base_currency,
                     "price_source": price_info.source,
                     "price_provider": price_info.provider,
                     "price_date": price_info.price_date.isoformat() if price_info.price_date else None,
                     "price_stale": price_info.is_stale,
                     "price_available": price_info.is_available,
+                    "stock_name": stock_name,
                 }
             )
 
@@ -1054,7 +1066,11 @@ class PortfolioService:
     def _resolve_position_price(self, *, symbol: str, as_of_date: date) -> _ResolvedPositionPrice:
         today = date.today()
 
-        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
+        # Always use the latest close price strictly BEFORE as_of_date
+        # to avoid showing intraday/unsettled prices for positions.
+        # For position valuation, we want "yesterday's close" not "today's live price".
+        cutoff_date = as_of_date - timedelta(days=1)
+        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=cutoff_date)
         if close is not None:
             close_price, close_date = close
             if close_price > 0:
@@ -1062,10 +1078,12 @@ class PortfolioService:
                     price=float(close_price),
                     source="history_close",
                     price_date=close_date,
-                    is_stale=close_date < as_of_date,
+                    is_stale=close_date < cutoff_date,
                     is_available=True,
                 )
 
+        # Fallback: only try realtime if explicitly viewing today's snapshot
+        # and no historical close is available at all.
         if as_of_date == today:
             realtime_price, provider = self._fetch_realtime_position_price(symbol)
             if realtime_price is not None and realtime_price > 0:
@@ -1111,6 +1129,19 @@ class PortfolioService:
         source = getattr(quote, "source", None)
         provider = getattr(source, "value", None) or (str(source) if source is not None else None)
         return numeric_price, provider
+
+    @staticmethod
+    def _fetch_stock_name(symbol: str) -> Optional[str]:
+        """Fetch stock name for display in portfolio positions."""
+        try:
+            from data_provider.base import DataFetcherManager
+
+            # Use allow_realtime=False to avoid triggering expensive full-market quote requests
+            name = DataFetcherManager().get_stock_name(symbol, allow_realtime=False)
+            return name if name and name.strip() else None
+        except Exception as exc:
+            logger.debug("Failed to fetch stock name for %s: %s", symbol, exc)
+            return None
 
     @staticmethod
     def _normalize_symbol_for_storage(symbol: str) -> str:
