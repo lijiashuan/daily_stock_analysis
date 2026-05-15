@@ -1644,13 +1644,6 @@ const PortfolioPage: React.FC = () => {
             {/* 券商 CSV 导入区域 */}
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>
-              {!writableAccountId && (
-                <InlineAlert
-                  variant="warning"
-                  className="rounded-lg px-2 py-1 text-xs shadow-none mb-2"
-                  message="请先在右上角选择具体账户，再进行 CSV 导入。"
-                />
-              )}
               <div className="space-y-2">
                 {brokerLoadWarning ? (
                   <InlineAlert
