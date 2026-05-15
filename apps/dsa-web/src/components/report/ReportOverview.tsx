@@ -13,6 +13,7 @@ interface ReportOverviewProps {
   summary: ReportSummaryType;
   details?: ReportDetailsType;
   isHistory?: boolean;
+  hideSentiment?: boolean;
 }
 
 type BoardStatus = 'leading' | 'lagging';
@@ -77,6 +78,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   meta,
   summary,
   details,
+  hideSentiment = false,
 }) => {
   const reportLanguage = normalizeReportLanguage(meta.reportLanguage);
   const text = getReportText(reportLanguage);
@@ -123,7 +125,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* 主信息区 - 两列布局，items-stretch 确保右侧与左侧同高 */}
+      {/* 主信息区 - 两列布局：左侧股票信息+结论，右侧情绪指标 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-stretch">
         {/* 左侧：股票信息与结论 */}
         <div className="lg:col-span-2 space-y-5">

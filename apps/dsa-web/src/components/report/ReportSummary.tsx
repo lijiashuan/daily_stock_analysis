@@ -5,6 +5,8 @@ import { ReportStrategy } from './ReportStrategy';
 import { ReportNews } from './ReportNews';
 import { ReportDetails } from './ReportDetails';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { Card } from '../common';
+import { ScoreGauge } from '../common/ScoreGauge';
 
 interface ReportSummaryProps {
   data: AnalysisResult | AnalysisReport;
@@ -34,19 +36,27 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
   return (
     <div className="space-y-5 pb-8 animate-fade-in">
-      {/* 概览区（首屏） */}
-      <ReportOverview
-        meta={meta}
-        summary={summary}
-        details={details}
-        isHistory={isHistory}
-      />
+      {/* 概览区（首屏）- 左侧主内容 + 右侧资讯栏 */}
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-5 items-start">
+        <div className="space-y-5">
+          {/* 左侧主内容：股票信息 + 情绪仪表盘 + 操作建议 + 趋势预测 + 板块联动 + 策略点位 */}
+          <ReportOverview
+            meta={meta}
+            summary={summary}
+            details={details}
+            isHistory={isHistory}
+            hideSentiment={false}
+          />
 
-      {/* 策略点位区 */}
-      <ReportStrategy strategy={strategy} language={reportLanguage} />
+          {/* 策略点位区 */}
+          <ReportStrategy strategy={strategy} language={reportLanguage} />
+        </div>
 
-      {/* 资讯区 */}
-      <ReportNews recordId={recordId} limit={8} language={reportLanguage} />
+        {/* 右侧边栏：资讯动态 */}
+        <div className="space-y-5 lg:sticky lg:top-4">
+          <ReportNews recordId={recordId} limit={8} language={reportLanguage} />
+        </div>
+      </div>
 
       {/* 透明度与追溯区 */}
       <ReportDetails details={details} recordId={recordId} language={reportLanguage} />
