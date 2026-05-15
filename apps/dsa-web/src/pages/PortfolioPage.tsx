@@ -238,7 +238,7 @@ const PortfolioPage: React.FC = () => {
   const [newRule, setNewRule] = useState<{
     stockCode: string;
     alertType: 'price_cross' | 'price_change_percent' | 'volume_spike';
-    direction: 'above' | 'up';
+    direction: 'above' | 'below' | 'up' | 'down';
     price: string;
     changePct: string;
     multiplier: string;
