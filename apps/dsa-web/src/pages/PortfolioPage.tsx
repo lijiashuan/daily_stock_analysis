@@ -220,6 +220,8 @@ const PortfolioPage: React.FC = () => {
   const [csvParseResult, setCsvParseResult] = useState<PortfolioImportParseResponse | null>(null);
   const [csvCommitResult, setCsvCommitResult] = useState<PortfolioImportCommitResponse | null>(null);
   const [brokerLoadWarning, setBrokerLoadWarning] = useState<string | null>(null);
+  const [importEventType, setImportEventType] = useState<'trade' | 'cash' | 'corporate'>('trade');
+
 
   const [eventType, setEventType] = useState<EventType>('trade');
   const [eventDateFrom, setEventDateFrom] = useState('');
@@ -327,6 +329,7 @@ const PortfolioPage: React.FC = () => {
       }
     }
   }, [selectedBroker]);
+
 
   const loadSnapshotAndRisk = useCallback(async () => {
     setIsLoading(true);
@@ -611,14 +614,20 @@ const PortfolioPage: React.FC = () => {
   };
 
   const handleParseCsv = async () => {
-    if (!csvFile) return;
+    if (!csvFile) {
+      setWriteWarning('请先选择 CSV 文件。');
+      return;
+    }
     try {
+      setWriteWarning(null);
       setCsvParsing(true);
-      const parsed = await portfolioApi.parseCsvImport(selectedBroker, csvFile);
+      const parsed = await portfolioApi.parseCsvImport(selectedBroker, csvFile, importEventType);
       setCsvParseResult(parsed);
       setCsvCommitResult(null);
     } catch (err) {
-      setError(getParsedApiError(err));
+      const apiError = getParsedApiError(err);
+      setWriteWarning(apiError.message || '解析文件失败，请稍后重试。');
+      setError(apiError);
     } finally {
       setCsvParsing(false);
     }
@@ -633,7 +642,7 @@ const PortfolioPage: React.FC = () => {
     try {
       setWriteWarning(null);
       setCsvCommitting(true);
-      const committed = await portfolioApi.commitCsvImport(writableAccountId, selectedBroker, csvFile, csvDryRun);
+      const committed = await portfolioApi.commitCsvImport(writableAccountId, selectedBroker, csvFile, csvDryRun, importEventType);
       setCsvCommitResult(committed);
       if (!csvDryRun) {
         await refreshPortfolioData();
@@ -1338,7 +1347,7 @@ const PortfolioPage: React.FC = () => {
                 message={brokerLoadWarning}
               />
             ) : null}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
                 {brokers.length > 0 ? (
                   brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
@@ -1346,10 +1355,20 @@ const PortfolioPage: React.FC = () => {
                   <option value="huatai">huatai（华泰）</option>
                 )}
               </select>
+              <select className={PORTFOLIO_SELECT_CLASS} value={importEventType} onChange={(e) => setImportEventType(e.target.value as 'trade' | 'cash' | 'corporate')}>
+                <option value="trade">交易流水</option>
+                <option value="cash">资金流水</option>
+                <option value="corporate">公司行为</option>
+              </select>
               <label className={PORTFOLIO_FILE_PICKER_CLASS}>
                 选择 CSV
-                <input type="file" accept=".csv" className="hidden"
-                  onChange={(e) => setCsvFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+                <input type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                    setCsvFile(file);
+                    setCsvParseResult(null);
+                    setCsvCommitResult(null);
+                  }} />
               </label>
             </div>
             <div className="flex items-center gap-2 text-xs text-secondary">
@@ -1534,6 +1553,7 @@ const PortfolioPage: React.FC = () => {
           </div>
         </Card>
       </section>
+
       <ConfirmDialog
         isOpen={Boolean(pendingDelete)}
         title="删除错误流水"

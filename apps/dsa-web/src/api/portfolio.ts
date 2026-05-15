@@ -242,10 +242,15 @@ export const portfolioApi = {
     return toCamelCase<PortfolioImportBrokerListResponse>(response.data);
   },
 
-  async parseCsvImport(broker: string, file: File): Promise<PortfolioImportParseResponse> {
+  async parseCsvImport(
+    broker: string,
+    file: File,
+    eventType: 'trade' | 'cash' | 'corporate' = 'trade',
+  ): Promise<PortfolioImportParseResponse> {
     const formData = new FormData();
     formData.append('broker', broker);
     formData.append('file', file);
+    formData.append('event_type', eventType);
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/imports/csv/parse', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -257,12 +262,14 @@ export const portfolioApi = {
     broker: string,
     file: File,
     dryRun = false,
+    eventType: 'trade' | 'cash' | 'corporate' = 'trade',
   ): Promise<PortfolioImportCommitResponse> {
     const formData = new FormData();
     formData.append('account_id', String(accountId));
     formData.append('broker', broker);
     formData.append('dry_run', dryRun ? 'true' : 'false');
     formData.append('file', file);
+    formData.append('event_type', eventType);
     const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/imports/csv/commit', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });

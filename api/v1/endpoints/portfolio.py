@@ -459,17 +459,26 @@ def get_snapshot(
     "/imports/csv/parse",
     response_model=PortfolioImportParseResponse,
     responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-    summary="Parse broker CSV/Excel into normalized trade records",
+    summary="Parse broker CSV/Excel into normalized records",
 )
 def parse_csv_import(
     broker: str = Form(..., description="Broker id: huatai/citic/cmb"),
     file: UploadFile = File(...),
+    event_type: str = Form("trade", description="Event type: trade/cash/corporate"),
 ) -> PortfolioImportParseResponse:
     importer = PortfolioImportService()
     try:
         content = file.file.read()
         filename = file.filename or ""
-        parsed = importer.parse_trade_csv(broker=broker, content=content, filename=filename)
+        
+        # Route to appropriate parser based on event_type
+        if event_type == "cash":
+            parsed = importer.parse_cash_ledger_csv(broker=broker, content=content, filename=filename)
+        elif event_type == "corporate":
+            parsed = importer.parse_corporate_action_csv(broker=broker, content=content, filename=filename)
+        else:  # default to trade
+            parsed = importer.parse_trade_csv(broker=broker, content=content, filename=filename)
+        
         return PortfolioImportParseResponse(
             broker=parsed["broker"],
             record_count=parsed["record_count"],
@@ -477,7 +486,7 @@ def parse_csv_import(
             error_count=parsed["error_count"],
             records=[_serialize_import_record(item) for item in parsed.get("records", [])],
             errors=list(parsed.get("errors", [])),
-            skip_reasons=parsed.get("skip_reasons", {}),  # 新增：返回跳过原因
+            skip_reasons=parsed.get("skip_reasons", {}),
         )
     except ValueError as exc:
         raise _bad_request(exc)
@@ -510,24 +519,48 @@ def commit_csv_import(
     broker: str = Form(..., description="Broker id: huatai/citic/cmb"),
     dry_run: bool = Form(False),
     file: UploadFile = File(...),
+    event_type: str = Form("trade", description="Event type: trade/cash/corporate"),
 ) -> PortfolioImportCommitResponse:
     importer = PortfolioImportService()
     try:
         content = file.file.read()
         filename = file.filename or ""
-        parsed = importer.parse_trade_csv(broker=broker, content=content, filename=filename)
+        
+        # Parse based on event_type
+        if event_type == "cash":
+            parsed = importer.parse_cash_ledger_csv(broker=broker, content=content, filename=filename)
+        elif event_type == "corporate":
+            parsed = importer.parse_corporate_action_csv(broker=broker, content=content, filename=filename)
+        else:  # default to trade
+            parsed = importer.parse_trade_csv(broker=broker, content=content, filename=filename)
         
         # Log parse statistics
         logger.info(f"Parsed {parsed['record_count']} records, skipped {parsed['skipped_count']}")
         if parsed.get('skip_reasons'):
             logger.warning(f"Skip reasons: {parsed['skip_reasons']}")
         
-        result = importer.commit_trade_records(
-            account_id=account_id,
-            broker=parsed["broker"],
-            records=list(parsed.get("records", [])),
-            dry_run=dry_run,
-        )
+        # Commit based on event_type
+        if event_type == "cash":
+            result = importer.commit_cash_records(
+                account_id=account_id,
+                broker=parsed["broker"],
+                records=list(parsed.get("records", [])),
+                dry_run=dry_run,
+            )
+        elif event_type == "corporate":
+            result = importer.commit_corporate_records(
+                account_id=account_id,
+                broker=parsed["broker"],
+                records=list(parsed.get("records", [])),
+                dry_run=dry_run,
+            )
+        else:  # default to trade
+            result = importer.commit_trade_records(
+                account_id=account_id,
+                broker=parsed["broker"],
+                records=list(parsed.get("records", [])),
+                dry_run=dry_run,
+            )
         
         # Log commit statistics
         logger.info(

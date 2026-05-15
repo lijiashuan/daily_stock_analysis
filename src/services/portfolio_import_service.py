@@ -48,6 +48,16 @@ DEFAULT_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
             "fee": ("Fee", "fee", "手续费"),
             "tax": ("Tax", "tax", "印花税"),
             "currency": ("Currency", "currency", "币种"),
+            # Cash ledger fields
+            "event_date": ("发生日期", "成交日期", "日期", "交易日期", "Event Date", "event_date"),
+            "direction": ("方向", "资金方向", "收支标志", "Direction", "direction"),
+            "amount": ("金额", "发生金额", "资金金额", "Amount", "amount"),
+            "note": ("摘要", "备注", "说明", "Note", "note"),
+            # Corporate action fields
+            "effective_date": ("生效日期", "股权登记日", "除权除息日", "Effective Date", "effective_date"),
+            "action_type": ("行为类型", "公司行为", "权益类型", "Action Type", "action_type"),
+            "cash_dividend_per_share": ("每股分红", "分红金额", "股息", "Dividend Per Share", "dividend_per_share"),
+            "split_ratio": ("送转比例", "拆股比例", "配股比例", "Split Ratio", "split_ratio"),
         },
     ),
     CsvParserSpec(
@@ -64,6 +74,16 @@ DEFAULT_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
             "fee": ("Fee", "fee", "手续费"),
             "tax": ("Tax", "tax", "印花税"),
             "currency": ("Currency", "currency", "币种"),
+            # Cash ledger fields
+            "event_date": ("发生日期", "成交日期", "日期", "交易日期", "Event Date", "event_date"),
+            "direction": ("方向", "资金方向", "收支标志", "Direction", "direction"),
+            "amount": ("金额", "发生金额", "资金金额", "Amount", "amount"),
+            "note": ("摘要", "备注", "说明", "Note", "note"),
+            # Corporate action fields
+            "effective_date": ("生效日期", "股权登记日", "除权除息日", "Effective Date", "effective_date"),
+            "action_type": ("行为类型", "公司行为", "权益类型", "Action Type", "action_type"),
+            "cash_dividend_per_share": ("每股分红", "分红金额", "股息", "Dividend Per Share", "dividend_per_share"),
+            "split_ratio": ("送转比例", "拆股比例", "配股比例", "Split Ratio", "split_ratio"),
         },
     ),
     CsvParserSpec(
@@ -80,6 +100,16 @@ DEFAULT_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
             "fee": ("Fee", "fee", "手续费"),
             "tax": ("Tax", "tax", "印花税"),
             "currency": ("Currency", "currency", "币种"),
+            # Cash ledger fields
+            "event_date": ("日期", "成交日期", "发生日期", "交易日期", "Event Date", "event_date"),
+            "direction": ("方向", "资金方向", "收支标志", "Direction", "direction"),
+            "amount": ("金额", "发生金额", "资金金额", "Amount", "amount"),
+            "note": ("摘要", "备注", "说明", "Note", "note"),
+            # Corporate action fields
+            "effective_date": ("生效日期", "股权登记日", "除权除息日", "Effective Date", "effective_date"),
+            "action_type": ("行为类型", "公司行为", "权益类型", "Action Type", "action_type"),
+            "cash_dividend_per_share": ("每股分红", "分红金额", "股息", "Dividend Per Share", "dividend_per_share"),
+            "split_ratio": ("送转比例", "拆股比例", "配股比例", "Split Ratio", "split_ratio"),
         },
     ),
 )
@@ -167,12 +197,133 @@ class PortfolioImportService:
         Returns:
             Dictionary with parsed records and statistics
         """
+        return self._parse_event_csv(
+            event_type="trade",
+            broker=broker,
+            content=content,
+            filename=filename,
+        )
+
+    def parse_cash_ledger_csv(
+        self,
+        *,
+        broker: str,
+        content: bytes,
+        filename: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Parse broker CSV/Excel file into normalized cash ledger records.
+        
+        Args:
+            broker: Broker identifier (huatai/citic/cmb)
+            content: File content as bytes
+            filename: Original filename to detect format (.csv/.xls/.xlsx)
+            
+        Returns:
+            Dictionary with parsed records and statistics
+        """
+        return self._parse_event_csv(
+            event_type="cash",
+            broker=broker,
+            content=content,
+            filename=filename,
+        )
+
+    def parse_corporate_action_csv(
+        self,
+        *,
+        broker: str,
+        content: bytes,
+        filename: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Parse broker CSV/Excel file into normalized corporate action records.
+        
+        Args:
+            broker: Broker identifier (huatai/citic/cmb)
+            content: File content as bytes
+            filename: Original filename to detect format (.csv/.xls/.xlsx)
+            
+        Returns:
+            Dictionary with parsed records and statistics
+        """
+        return self._parse_event_csv(
+            event_type="corporate",
+            broker=broker,
+            content=content,
+            filename=filename,
+        )
+
+    def _parse_event_csv(
+        self,
+        *,
+        event_type: str,
+        broker: str,
+        content: bytes,
+        filename: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Unified parser for trade/cash/corporate events.
+        
+        Args:
+            event_type: One of 'trade', 'cash', 'corporate'
+            broker: Broker identifier
+            content: File content as bytes
+            filename: Original filename
+            
+        Returns:
+            Dictionary with parsed records and statistics
+        """
         broker_norm = self._normalize_broker(broker)
         parser_spec = self._parser_registry[broker_norm]
         df = self._read_spreadsheet(content, filename=filename)
         
         # Log column names for debugging
         logger.info(f"Parsed DataFrame columns: {list(df.columns)}")
+        logger.info(f"DataFrame shape: {df.shape}")
+        if len(df) > 0:
+            logger.info(f"First row sample: {df.iloc[0].to_dict()}")
+
+        records: List[Dict[str, Any]] = []
+        skipped = 0
+        errors: List[str] = []
+        skip_reasons: Dict[str, int] = {}
+
+        for idx, row in df.iterrows():
+            if event_type == "trade":
+                normalized, skip_reason = self._normalize_trade_row_with_reason(row=row, parser_spec=parser_spec)
+            elif event_type == "cash":
+                normalized, skip_reason = self._normalize_cash_row_with_reason(row=row, parser_spec=parser_spec)
+            elif event_type == "corporate":
+                normalized, skip_reason = self._normalize_corporate_row_with_reason(row=row, parser_spec=parser_spec)
+            else:
+                normalized, skip_reason = None, f"unsupported_event_type:{event_type}"
+            
+            if normalized is None:
+                skipped += 1
+                if skip_reason:
+                    skip_reasons[skip_reason] = skip_reasons.get(skip_reason, 0) + 1
+                continue
+            try:
+                normalized["_source_line_number"] = int(idx) + 2
+                normalized["dedup_hash"] = self._build_dedup_hash(normalized)
+                records.append(normalized)
+            except Exception as exc:
+                skipped += 1
+                errors.append(f"row={idx + 1}: {exc}")
+        
+        if skip_reasons:
+            logger.warning(f"Skip reasons summary: {skip_reasons}")
+
+        return {
+            "broker": broker_norm,
+            "record_count": len(records),
+            "skipped_count": skipped,
+            "error_count": len(errors),
+            "records": records,
+            "errors": errors[:20],
+            "skip_reasons": skip_reasons,
+        }
         logger.info(f"DataFrame shape: {df.shape}")
         if len(df) > 0:
             logger.info(f"First row sample: {df.iloc[0].to_dict()}")
@@ -224,6 +375,9 @@ class PortfolioImportService:
     ) -> Dict[str, Any]:
         broker_norm = self._normalize_broker(broker)
 
+        # 按交易日期升序排序，防止导出顺序非时间序导致假性超卖报错
+        records = sorted(records, key=lambda r: (r.get("trade_date"), r.get("_source_line_number", 0)))
+
         inserted_count = 0
         duplicate_count = 0
         failed_count = 0
@@ -266,30 +420,175 @@ class PortfolioImportService:
                 else:
                     trade_date_obj = date.fromisoformat(str(trade_date_value))
 
-                self.portfolio_service.record_trade(
-                    account_id=account_id,
-                    symbol=str(record["symbol"]),
-                    trade_date=trade_date_obj,
-                    side=str(record["side"]),
-                    quantity=float(record["quantity"]),
-                    price=float(record["price"]),
-                    fee=float(record.get("fee", 0.0) or 0.0),
-                    tax=float(record.get("tax", 0.0) or 0.0),
-                    market=record.get("market"),
-                    currency=record.get("currency"),
-                    trade_uid=trade_uid,
-                    dedup_hash=dedup_hash_to_use,
-                    note=(record.get("note") or "").strip() or f"csv_import:{broker_norm}",
-                )
-                inserted_count += 1
-            except PortfolioConflictError:
-                duplicate_count += 1
-            except PortfolioOversellError as exc:
-                failed_count += 1
-                errors.append(f"idx={i}: {exc}")
+                try:
+                    self.portfolio_service.record_trade(
+                        account_id=account_id,
+                        symbol=str(record["symbol"]),
+                        trade_date=trade_date_obj,
+                        side=str(record["side"]),
+                        quantity=float(record["quantity"]),
+                        price=float(record["price"]),
+                        fee=float(record.get("fee", 0.0) or 0.0),
+                        tax=float(record.get("tax", 0.0) or 0.0),
+                        market=record.get("market"),
+                        currency=record.get("currency"),
+                        trade_uid=trade_uid,
+                        dedup_hash=dedup_hash_to_use,
+                        note=(record.get("note") or "").strip() or f"csv_import:{broker_norm}",
+                    )
+                    inserted_count += 1
+                except PortfolioOversellError as oversell_exc:
+                    # 超卖仅记录警告，不阻断导入（支持增量/不完整数据导入）
+                    logger.warning(
+                        f"Import oversell warning (non-blocking) for {record['symbol']} on {trade_date_obj}: {oversell_exc}"
+                    )
+                    errors.append(f"idx={i}: oversell_warning: {oversell_exc}")
+                    inserted_count += 1
             except PortfolioBusyError as exc:
                 failed_count += 1
                 errors.append(f"idx={i}: portfolio_busy: {exc}")
+            except Exception as exc:
+                failed_count += 1
+                errors.append(f"idx={i}: {exc}")
+
+        return {
+            "account_id": account_id,
+            "record_count": len(records),
+            "inserted_count": inserted_count,
+            "duplicate_count": duplicate_count,
+            "failed_count": failed_count,
+            "dry_run": bool(dry_run),
+            "errors": errors[:20],
+        }
+
+    def commit_cash_records(
+        self,
+        *,
+        account_id: int,
+        broker: str,
+        records: List[Dict[str, Any]],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """Commit cash ledger records to database."""
+        broker_norm = self._normalize_broker(broker)
+
+        # Sort by event date
+        records = sorted(records, key=lambda r: (r.get("event_date"), r.get("_source_line_number", 0)))
+
+        inserted_count = 0
+        duplicate_count = 0
+        failed_count = 0
+        errors: List[str] = []
+        seen_dedup_hashes: set[str] = set()
+
+        for i, record in enumerate(records):
+            try:
+                dedup_hash = (record.get("dedup_hash") or "").strip()
+                if not dedup_hash:
+                    dedup_hash = self._build_dedup_hash(record)
+
+                # In-memory dedup for current batch
+                if dedup_hash and dedup_hash in seen_dedup_hashes:
+                    duplicate_count += 1
+                    continue
+
+                if dry_run:
+                    inserted_count += 1
+                    if dedup_hash:
+                        seen_dedup_hashes.add(dedup_hash)
+                    continue
+
+                event_date_value = record.get("event_date")
+                if isinstance(event_date_value, date):
+                    event_date_obj = event_date_value
+                else:
+                    event_date_obj = date.fromisoformat(str(event_date_value))
+
+                self.portfolio_service.record_cash_ledger(
+                    account_id=account_id,
+                    event_date=event_date_obj,
+                    direction=str(record["direction"]),
+                    amount=float(record["amount"]),
+                    currency=record.get("currency", "CNY"),
+                    note=(record.get("note") or "").strip() or f"csv_import:{broker_norm}",
+                )
+                inserted_count += 1
+                if dedup_hash:
+                    seen_dedup_hashes.add(dedup_hash)
+            except PortfolioConflictError:
+                duplicate_count += 1
+            except Exception as exc:
+                failed_count += 1
+                errors.append(f"idx={i}: {exc}")
+
+        return {
+            "account_id": account_id,
+            "record_count": len(records),
+            "inserted_count": inserted_count,
+            "duplicate_count": duplicate_count,
+            "failed_count": failed_count,
+            "dry_run": bool(dry_run),
+            "errors": errors[:20],
+        }
+
+    def commit_corporate_records(
+        self,
+        *,
+        account_id: int,
+        broker: str,
+        records: List[Dict[str, Any]],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """Commit corporate action records to database."""
+        broker_norm = self._normalize_broker(broker)
+
+        # Sort by effective date
+        records = sorted(records, key=lambda r: (r.get("effective_date"), r.get("_source_line_number", 0)))
+
+        inserted_count = 0
+        duplicate_count = 0
+        failed_count = 0
+        errors: List[str] = []
+        seen_dedup_hashes: set[str] = set()
+
+        for i, record in enumerate(records):
+            try:
+                dedup_hash = (record.get("dedup_hash") or "").strip()
+                if not dedup_hash:
+                    dedup_hash = self._build_dedup_hash(record)
+
+                # In-memory dedup for current batch
+                if dedup_hash and dedup_hash in seen_dedup_hashes:
+                    duplicate_count += 1
+                    continue
+
+                if dry_run:
+                    inserted_count += 1
+                    if dedup_hash:
+                        seen_dedup_hashes.add(dedup_hash)
+                    continue
+
+                effective_date_value = record.get("effective_date")
+                if isinstance(effective_date_value, date):
+                    effective_date_obj = effective_date_value
+                else:
+                    effective_date_obj = date.fromisoformat(str(effective_date_value))
+
+                self.portfolio_service.record_corporate_action(
+                    account_id=account_id,
+                    symbol=str(record["symbol"]),
+                    effective_date=effective_date_obj,
+                    action_type=str(record["action_type"]),
+                    cash_dividend_per_share=record.get("cash_dividend_per_share"),
+                    split_ratio=record.get("split_ratio"),
+                    currency=record.get("currency", "CNY"),
+                    note=(record.get("note") or "").strip() or f"csv_import:{broker_norm}",
+                )
+                inserted_count += 1
+                if dedup_hash:
+                    seen_dedup_hashes.add(dedup_hash)
+            except PortfolioConflictError:
+                duplicate_count += 1
             except Exception as exc:
                 failed_count += 1
                 errors.append(f"idx={i}: {exc}")
@@ -1024,3 +1323,180 @@ class PortfolioImportService:
             ]
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _normalize_cash_row_with_reason(
+        self,
+        *,
+        row: Any,
+        parser_spec: CsvParserSpec,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Normalize cash ledger row with skip reason tracking."""
+        broker_hints = parser_spec.column_hints
+
+        # Check event_date
+        event_date_raw = self._pick(
+            row,
+            *(broker_hints.get("event_date") or ()),
+            "发生日期", "成交日期", "日期", "交易日期",
+            "Event Date", "event_date",
+        )
+        if event_date_raw is None:
+            return None, "missing_event_date_column"
+        
+        event_date_obj = self._parse_date(event_date_raw)
+        if event_date_obj is None:
+            return None, f"invalid_event_date: {event_date_raw}"
+
+        # Check direction
+        direction_raw = self._pick(
+            row,
+            *(broker_hints.get("direction") or ()),
+            "方向", "资金方向", "收支标志",
+            "Direction", "direction",
+        )
+        if direction_raw is None:
+            return None, "missing_direction_column"
+        
+        direction_text = str(direction_raw).strip().lower()
+        if direction_text in ("in", "收入", "入金", "转入", "deposit"):
+            direction = "in"
+        elif direction_text in ("out", "支出", "出金", "转出", "withdrawal"):
+            direction = "out"
+        else:
+            return None, f"invalid_direction: {direction_raw}"
+
+        # Check amount
+        amount_raw = self._pick(
+            row,
+            *(broker_hints.get("amount") or ()),
+            "金额", "发生金额", "资金金额",
+            "Amount", "amount",
+        )
+        if amount_raw is None:
+            return None, "missing_amount_column"
+        
+        amount = self._parse_float(amount_raw)
+        if amount is None:
+            return None, f"invalid_amount: {amount_raw}"
+
+        currency = self._pick(
+            row,
+            *(broker_hints.get("currency") or ()),
+            "币种", "货币",
+            "Currency", "currency",
+        )
+        note = self._pick(
+            row,
+            *(broker_hints.get("note") or ()),
+            "摘要", "备注", "说明",
+            "Note", "note",
+        )
+
+        return {
+            "event_date": event_date_obj,
+            "direction": direction,
+            "amount": float(abs(amount)),
+            "currency": (str(currency).strip().upper() if currency is not None else "CNY") or "CNY",
+            "note": (str(note).strip() if note is not None else "") or "",
+        }, None
+
+    def _normalize_corporate_row_with_reason(
+        self,
+        *,
+        row: Any,
+        parser_spec: CsvParserSpec,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Normalize corporate action row with skip reason tracking."""
+        broker_hints = parser_spec.column_hints
+
+        # Check effective_date
+        effective_date_raw = self._pick(
+            row,
+            *(broker_hints.get("effective_date") or ()),
+            "生效日期", "股权登记日", "除权除息日",
+            "Effective Date", "effective_date",
+        )
+        if effective_date_raw is None:
+            return None, "missing_effective_date_column"
+        
+        effective_date_obj = self._parse_date(effective_date_raw)
+        if effective_date_obj is None:
+            return None, f"invalid_effective_date: {effective_date_raw}"
+
+        # Check symbol
+        symbol_raw = self._pick(
+            row,
+            *(broker_hints.get("symbol") or ()),
+            "证券代码", "股票代码", "代码",
+            "Symbol", "symbol",
+        )
+        if symbol_raw is None:
+            return None, "missing_symbol_column"
+        
+        symbol = canonical_stock_code(str(symbol_raw).strip())
+        if not symbol:
+            return None, f"invalid_symbol: {symbol_raw}"
+
+        # Check action_type
+        action_type_raw = self._pick(
+            row,
+            *(broker_hints.get("action_type") or ()),
+            "行为类型", "公司行为", "权益类型",
+            "Action Type", "action_type",
+        )
+        if action_type_raw is None:
+            return None, "missing_action_type_column"
+        
+        action_text = str(action_type_raw).strip().lower()
+        if "分红" in action_text or "dividend" in action_text or "现金" in action_text:
+            action_type = "cash_dividend"
+        elif "送股" in action_text or "转增" in action_text or "split" in action_text:
+            action_type = "split_adjustment"
+        else:
+            return None, f"unsupported_action_type: {action_type_raw}"
+
+        # Parse optional fields based on action type
+        cash_dividend_per_share = None
+        split_ratio = None
+        
+        if action_type == "cash_dividend":
+            dividend_raw = self._pick(
+                row,
+                *(broker_hints.get("cash_dividend_per_share") or ()),
+                "每股分红", "分红金额", "股息",
+                "Dividend Per Share", "dividend_per_share",
+            )
+            if dividend_raw is not None:
+                cash_dividend_per_share = self._parse_float(dividend_raw)
+        elif action_type == "split_adjustment":
+            ratio_raw = self._pick(
+                row,
+                *(broker_hints.get("split_ratio") or ()),
+                "送转比例", "拆股比例", "配股比例",
+                "Split Ratio", "split_ratio",
+            )
+            if ratio_raw is not None:
+                split_ratio = self._parse_float(ratio_raw)
+
+        currency = self._pick(
+            row,
+            *(broker_hints.get("currency") or ()),
+            "币种", "货币",
+            "Currency", "currency",
+        )
+        note = self._pick(
+            row,
+            *(broker_hints.get("note") or ()),
+            "摘要", "备注", "说明",
+            "Note", "note",
+        )
+
+        return {
+            "effective_date": effective_date_obj,
+            "symbol": symbol,
+            "action_type": action_type,
+            "cash_dividend_per_share": cash_dividend_per_share,
+            "split_ratio": split_ratio,
+            "currency": (str(currency).strip().upper() if currency is not None else "CNY") or "CNY",
+            "note": (str(note).strip() if note is not None else "") or "",
+        }, None
