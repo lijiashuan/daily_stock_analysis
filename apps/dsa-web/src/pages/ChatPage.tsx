@@ -66,6 +66,7 @@ const ChatPage: React.FC = () => {
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [exportingMessageId, setExportingMessageId] = useState<string | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState<string | null>(null);
+  const [showQuestionNav, setShowQuestionNav] = useState(false);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -132,6 +133,17 @@ const ChatPage: React.FC = () => {
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  const scrollToMessage = useCallback((messageId: string, behavior: ScrollBehavior = 'smooth') => {
+    const element = document.getElementById(`message-${messageId}`);
+    if (element) {
+      element.scrollIntoView({ behavior, block: 'start' });
+      element.classList.add('message-highlight');
+      setTimeout(() => {
+        element.classList.remove('message-highlight');
+      }, 2000);
+    }
   }, []);
 
   const requestScrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -530,6 +542,14 @@ const ChatPage: React.FC = () => {
     </div>
   );
 
+  const userQuestions = messages
+    .filter((msg) => msg.role === 'user')
+    .map((msg) => ({
+      id: msg.id,
+      content: msg.content.length > 50 ? msg.content.slice(0, 50) + '...' : msg.content,
+      fullContent: msg.content,
+    }));
+
   const sidebarContent = (
     <>
       <div className="flex items-center justify-between border-b border-white/5 bg-white/2 p-3.5">
@@ -907,7 +927,8 @@ const ChatPage: React.FC = () => {
                 return (
                 <div
                   key={msg.id}
-                  className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+                  id={`message-${msg.id}`}
+                  className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''} transition-all duration-300`}
                 >
                   <div
                     className={cn(
@@ -1080,6 +1101,75 @@ const ChatPage: React.FC = () => {
                 </svg>
                 有新消息
               </button>
+            </div>
+          )}
+
+          {/* Question navigation toggle */}
+          {userQuestions.length > 0 && (
+            <div className="absolute top-4 right-4 z-20">
+              <button
+                type="button"
+                className={cn(
+                  "chat-copy-btn shadow-soft-card transition-all",
+                  showQuestionNav && "bg-cyan/10 text-cyan"
+                )}
+                onClick={() => setShowQuestionNav(!showQuestionNav)}
+                aria-label="显示问题导航"
+                aria-expanded={showQuestionNav}
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 6h16M4 10h16M4 14h16M4 18h16"
+                  />
+                </svg>
+                问题列表 ({userQuestions.length})
+              </button>
+            </div>
+          )}
+
+          {/* Question navigation panel */}
+          {showQuestionNav && userQuestions.length > 0 && (
+            <div className="absolute top-16 right-4 z-30 w-72 max-h-[60vh] overflow-auto rounded-xl border border-border/50 bg-card shadow-soft-card animate-fade-in">
+              <div className="sticky top-0 border-b border-border/30 bg-card/95 backdrop-blur-sm px-4 py-2.5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">问题列表</h3>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-text hover:text-foreground transition-colors"
+                    onClick={() => setShowQuestionNav(false)}
+                    aria-label="关闭问题导航"
+                  >
+                    关闭
+                  </button>
+                </div>
+              </div>
+              <div className="p-2 space-y-1">
+                {userQuestions.map((q, idx) => (
+                  <button
+                    key={q.id}
+                    onClick={() => scrollToMessage(q.id)}
+                    className="w-full text-left px-3 py-2 rounded-lg text-xs hover:bg-accent transition-all group"
+                    aria-label={`跳转到问题 ${idx + 1}: ${q.fullContent}`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-cyan/10 text-cyan flex items-center justify-center text-[10px] font-semibold">
+                        {idx + 1}
+                      </span>
+                      <span className="text-secondary-text group-hover:text-foreground transition-colors line-clamp-2 leading-relaxed">
+                        {q.content}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
