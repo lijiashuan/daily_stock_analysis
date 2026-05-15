@@ -1238,8 +1238,8 @@ const PortfolioPage: React.FC = () => {
                         className={`py-2 pr-2 text-right ${
                           hasPositionPrice(row)
                             ? row.unrealizedPnlBase >= 0
-                              ? 'text-success'
-                              : 'text-danger'
+                              ? 'text-danger'
+                              : 'text-success'
                             : 'text-secondary'
                         }`}
                       >
@@ -1249,8 +1249,8 @@ const PortfolioPage: React.FC = () => {
                         className={`py-2 pr-2 text-right ${
                           (row as any).realizedPnlBase !== null && (row as any).realizedPnlBase !== undefined
                             ? (row as any).realizedPnlBase >= 0
-                              ? 'text-success'
-                              : 'text-danger'
+                              ? 'text-danger'
+                              : 'text-success'
                             : 'text-secondary'
                         }`}
                       >
@@ -1260,8 +1260,8 @@ const PortfolioPage: React.FC = () => {
                         className={`py-2 text-right ${
                           hasPositionPrice(row) && row.unrealizedPnlPct !== null && row.unrealizedPnlPct !== undefined
                             ? row.unrealizedPnlPct >= 0
-                              ? 'text-success'
-                              : 'text-danger'
+                              ? 'text-danger'
+                              : 'text-success'
                             : 'text-secondary'
                         }`}
                       >
