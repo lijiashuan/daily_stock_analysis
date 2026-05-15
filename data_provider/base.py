@@ -481,7 +481,28 @@ class DataFetcherManager:
     - 优先使用高优先级数据源
     - 失败后自动切换到下一个
     - 所有数据源都失败时抛出异常
+    
+    注意：使用单例模式，确保全局只创建一个实例
     """
+
+    _instance: Optional['DataFetcherManager'] = None
+    _lock = RLock()
+
+    def __new__(cls, fetchers: Optional[List[BaseFetcher]] = None):
+        """单例模式实现"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    instance.__init__(fetchers)
+                    cls._instance = instance
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """重置单例（主要用于测试）"""
+        with cls._lock:
+            cls._instance = None
 
     _DAILY_MARKET_FETCHER_SUPPORT = {
         "EfinanceFetcher": {"cn"},

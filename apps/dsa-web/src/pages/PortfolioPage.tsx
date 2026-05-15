@@ -222,6 +222,70 @@ const PortfolioPage: React.FC = () => {
   const [brokerLoadWarning, setBrokerLoadWarning] = useState<string | null>(null);
   const [importEventType, setImportEventType] = useState<'trade' | 'cash' | 'corporate'>('trade');
 
+  // 自动监盘配置
+  const [monitorEnabled, setMonitorEnabled] = useState(false);
+  const [monitorInterval, setMonitorInterval] = useState('5');
+  const [monitorRules, setMonitorRules] = useState<Array<{
+    id: string;
+    stockCode: string;
+    alertType: 'price_cross' | 'price_change_percent' | 'volume_spike';
+    direction?: 'above' | 'below' | 'up' | 'down';
+    price?: string;
+    changePct?: string;
+    multiplier?: string;
+    description: string;
+  }>>([]);
+  const [newRule, setNewRule] = useState<{
+    stockCode: string;
+    alertType: 'price_cross' | 'price_change_percent' | 'volume_spike';
+    direction: 'above' | 'up';
+    price: string;
+    changePct: string;
+    multiplier: string;
+    description: string;
+  }>({
+    stockCode: '',
+    alertType: 'price_cross',
+    direction: 'above',
+    price: '',
+    changePct: '3',
+    multiplier: '2',
+    description: '',
+  });
+
+  // 自动监盘 - 添加规则
+  const handleAddMonitorRule = useCallback(() => {
+    if (!newRule.stockCode.trim()) {
+      return;
+    }
+    const id = Date.now().toString();
+    const rule = {
+      id,
+      stockCode: newRule.stockCode.trim(),
+      alertType: newRule.alertType,
+      direction: newRule.direction,
+      price: newRule.alertType === 'price_cross' ? newRule.price : undefined,
+      changePct: newRule.alertType === 'price_change_percent' ? newRule.changePct : undefined,
+      multiplier: newRule.alertType === 'volume_spike' ? newRule.multiplier : undefined,
+      description: newRule.description.trim() || `${newRule.stockCode} ${newRule.alertType}`,
+    };
+    setMonitorRules((prev) => [...prev, rule]);
+    setNewRule({
+      stockCode: '',
+      alertType: 'price_cross',
+      direction: 'above',
+      price: '',
+      changePct: '3',
+      multiplier: '2',
+      description: '',
+    });
+  }, [newRule]);
+
+  // 自动监盘 - 删除规则
+  const handleRemoveMonitorRule = useCallback((id: string) => {
+    setMonitorRules((prev) => prev.filter((rule) => rule.id !== id));
+  }, []);
+
 
   const [eventType, setEventType] = useState<EventType>('trade');
   const [eventDateFrom, setEventDateFrom] = useState('');
@@ -251,6 +315,27 @@ const PortfolioPage: React.FC = () => {
     tradeUid: '',
     note: '',
   });
+  const [feeAutoCalculated, setFeeAutoCalculated] = useState(false);
+
+  // 手续费自动计算
+  const calculateFee = useCallback((quantity: string, price: string, side: PortfolioSide): string => {
+    const qty = parseFloat(quantity);
+    const prc = parseFloat(price);
+    if (isNaN(qty) || isNaN(prc) || qty <= 0 || prc <= 0) return '';
+    
+    const amount = qty * prc;
+    let fee: number;
+    
+    if (side === 'buy') {
+      // 买入：手续费 = 数量 * 成交价 / 100000 + 5
+      fee = amount / 100000 + 5;
+    } else {
+      // 卖出：手续费 = 数量 * 成交价 / 100000 + 5 + 数量 * 成交价 * 5 / 10000
+      fee = amount / 100000 + 5 + amount * 5 / 10000;
+    }
+    
+    return fee.toFixed(2);
+  }, []);
   const [cashForm, setCashForm] = useState({
     eventDate: getTodayIso(),
     direction: 'in' as PortfolioCashDirection,
@@ -1273,18 +1358,51 @@ const PortfolioPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="数量（必填）" value={tradeForm.quantity}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
+                onChange={(e) => {
+                  const newQuantity = e.target.value;
+                  setTradeForm((prev) => ({ ...prev, quantity: newQuantity }));
+                  // 自动计算手续费
+                  if (newQuantity && tradeForm.price) {
+                    const calculatedFee = calculateFee(newQuantity, tradeForm.price, tradeForm.side);
+                    if (calculatedFee) {
+                      setTradeForm((prev) => ({ ...prev, fee: calculatedFee }));
+                      setFeeAutoCalculated(true);
+                    }
+                  }
+                }} required />
               <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="成交价（必填）" value={tradeForm.price}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, price: e.target.value }))} required />
+                onChange={(e) => {
+                  const newPrice = e.target.value;
+                  setTradeForm((prev) => ({ ...prev, price: newPrice }));
+                  // 自动计算手续费
+                  if (tradeForm.quantity && newPrice) {
+                    const calculatedFee = calculateFee(tradeForm.quantity, newPrice, tradeForm.side);
+                    if (calculatedFee) {
+                      setTradeForm((prev) => ({ ...prev, fee: calculatedFee }));
+                      setFeeAutoCalculated(true);
+                    }
+                  }
+                }} required />
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="手续费（可选）" value={tradeForm.fee}
-                onChange={(e) => setTradeForm((prev) => ({ ...prev, fee: e.target.value }))} />
+              <div className="relative">
+                <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="手续费（可选）" value={tradeForm.fee}
+                  onChange={(e) => {
+                    setTradeForm((prev) => ({ ...prev, fee: e.target.value }));
+                    setFeeAutoCalculated(false);
+                  }} />
+                {feeAutoCalculated && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-cyan/60">自动计算</span>
+                )}
+              </div>
               <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="税费（可选）" value={tradeForm.tax}
                 onChange={(e) => setTradeForm((prev) => ({ ...prev, tax: e.target.value }))} />
             </div>
-            <p className="text-xs text-secondary">手续费和税费可留空，系统将按 0 处理。</p>
-            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交交易</button>
+            <p className="text-xs text-secondary">
+              手续费可留空，系统将按 0 处理。
+              {feeAutoCalculated && <span className="text-cyan ml-1">（已自动计算）</span>}
+            </p>
+            <button type="submit" className="btn-secondary w-full h-11 text-sm" disabled={!writableAccountId}>提交交易</button>
           </form>
         </Card>
 
@@ -1304,7 +1422,7 @@ const PortfolioPage: React.FC = () => {
               value={cashForm.amount} onChange={(e) => setCashForm((prev) => ({ ...prev, amount: e.target.value }))} required />
             <input className={PORTFOLIO_INPUT_CLASS} placeholder={`币种（可选，默认 ${writableAccount?.baseCurrency || '账户基准币'}）`} value={cashForm.currency}
               onChange={(e) => setCashForm((prev) => ({ ...prev, currency: e.target.value }))} />
-            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交资金流水</button>
+            <button type="submit" className="btn-secondary w-full h-11 text-sm" disabled={!writableAccountId}>提交资金流水</button>
           </form>
         </Card>
 
@@ -1331,103 +1449,301 @@ const PortfolioPage: React.FC = () => {
                 value={corpForm.splitRatio}
                 onChange={(e) => setCorpForm((prev) => ({ ...prev, splitRatio: e.target.value, cashDividendPerShare: '' }))} required />
             )}
-            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交企业行为</button>
+            <button type="submit" className="btn-secondary w-full h-11 text-sm" disabled={!writableAccountId}>提交企业行为</button>
           </form>
         </Card>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-        <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>
-          <div className="space-y-2">
-            {brokerLoadWarning ? (
-              <InlineAlert
-                variant="warning"
-                className="rounded-lg px-2 py-1 text-xs shadow-none"
-                message={brokerLoadWarning}
-              />
-            ) : null}
-            <div className="grid grid-cols-3 gap-2">
-              <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
-                {brokers.length > 0 ? (
-                  brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
-                ) : (
-                  <option value="huatai">huatai（华泰）</option>
+      <section className="grid grid-cols-1 gap-3">
+        {/* 第一行：自动监盘 + 券商 CSV 导入 */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          {/* 自动监盘配置区域 */}
+          <Card padding="md">
+            <div className="space-y-3">
+              <h3 className="text-sm font-semibold text-foreground">自动监盘</h3>
+              <div className="space-y-3">
+                {/* 监盘开关和间隔 */}
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="monitor-enabled"
+                      type="checkbox"
+                      checked={monitorEnabled}
+                      onChange={(e) => setMonitorEnabled(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-600 text-cyan focus:ring-cyan"
+                    />
+                    <label htmlFor="monitor-enabled" className="text-sm text-secondary">
+                      启用自动监盘
+                    </label>
+                  </div>
+                  {monitorEnabled && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-secondary">检查间隔：</span>
+                      <select
+                        className="rounded-lg border border-white/10 bg-transparent px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-cyan"
+                        value={monitorInterval}
+                        onChange={(e) => setMonitorInterval(e.target.value)}
+                      >
+                        <option value="1">1 分钟</option>
+                        <option value="5">5 分钟</option>
+                        <option value="15">15 分钟</option>
+                        <option value="30">30 分钟</option>
+                        <option value="60">60 分钟</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* 规则添加表单 */}
+                {monitorEnabled && (
+                  <div className="space-y-2">
+                    <div className="text-xs text-secondary">添加监盘规则：</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <input
+                        className={PORTFOLIO_INPUT_CLASS}
+                        placeholder="股票代码（如 600519）"
+                        value={newRule.stockCode}
+                        onChange={(e) => setNewRule((prev) => ({ ...prev, stockCode: e.target.value }))}
+                      />
+                      <select
+                        className={PORTFOLIO_SELECT_CLASS}
+                        value={newRule.alertType}
+                        onChange={(e) => setNewRule((prev) => ({ ...prev, alertType: e.target.value as typeof newRule.alertType }))}
+                      >
+                        <option value="price_cross">价格突破</option>
+                        <option value="price_change_percent">涨跌幅</option>
+                        <option value="volume_spike">成交量异动</option>
+                      </select>
+                      {newRule.alertType === 'price_cross' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            className={PORTFOLIO_SELECT_CLASS}
+                            value={newRule.direction}
+                            onChange={(e) => setNewRule((prev) => ({ ...prev, direction: e.target.value as typeof newRule.direction }))}
+                          >
+                            <option value="above">突破</option>
+                            <option value="below">跌破</option>
+                          </select>
+                          <input
+                            className={PORTFOLIO_INPUT_CLASS}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="价格"
+                            value={newRule.price}
+                            onChange={(e) => setNewRule((prev) => ({ ...prev, price: e.target.value }))}
+                          />
+                        </div>
+                      )}
+                      {newRule.alertType === 'price_change_percent' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            className={PORTFOLIO_SELECT_CLASS}
+                            value={newRule.direction === 'above' ? 'up' : 'down'}
+                            onChange={(e) => setNewRule((prev) => ({
+                              ...prev,
+                              direction: e.target.value === 'up' ? 'above' : 'below'
+                            }))}
+                          >
+                            <option value="up">涨幅</option>
+                            <option value="down">跌幅</option>
+                          </select>
+                          <input
+                            className={PORTFOLIO_INPUT_CLASS}
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            placeholder="百分比"
+                            value={newRule.changePct}
+                            onChange={(e) => setNewRule((prev) => ({ ...prev, changePct: e.target.value }))}
+                          />
+                        </div>
+                      )}
+                      {newRule.alertType === 'volume_spike' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <span className="flex items-center text-xs text-secondary">倍数</span>
+                          <input
+                            className={PORTFOLIO_INPUT_CLASS}
+                            type="number"
+                            min="1"
+                            step="0.1"
+                            placeholder="成交量倍数"
+                            value={newRule.multiplier}
+                            onChange={(e) => setNewRule((prev) => ({ ...prev, multiplier: e.target.value }))}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <input
+                      className={PORTFOLIO_INPUT_CLASS}
+                      placeholder="备注（可选）"
+                      value={newRule.description}
+                      onChange={(e) => setNewRule((prev) => ({ ...prev, description: e.target.value }))}
+                    />
+                    <button
+                      type="button"
+                      className="btn-secondary w-full h-11 text-sm"
+                      onClick={handleAddMonitorRule}
+                      disabled={!newRule.stockCode.trim()}
+                    >
+                      添加规则
+                    </button>
+                  </div>
                 )}
-              </select>
-              <select className={PORTFOLIO_SELECT_CLASS} value={importEventType} onChange={(e) => setImportEventType(e.target.value as 'trade' | 'cash' | 'corporate')}>
-                <option value="trade">交易流水</option>
-                <option value="cash">资金流水</option>
-                <option value="corporate">公司行为</option>
-              </select>
-              <label className={PORTFOLIO_FILE_PICKER_CLASS}>
-                选择 CSV
-                <input type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-                    setCsvFile(file);
-                    setCsvParseResult(null);
-                    setCsvCommitResult(null);
-                  }} />
-              </label>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-secondary">
-              <input id="csv-dry-run" type="checkbox" checked={csvDryRun} onChange={(e) => setCsvDryRun(e.target.checked)} />
-              <label htmlFor="csv-dry-run">仅预演（不写入）</label>
-            </div>
-            <div className="flex gap-2">
-              <button type="button" className="btn-secondary flex-1" disabled={!csvFile || csvParsing} onClick={() => void handleParseCsv()}>
-                {csvParsing ? '解析中...' : '解析文件'}
-              </button>
-              <button type="button" className="btn-secondary flex-1"
-                disabled={!csvFile || !writableAccountId || csvCommitting} onClick={() => void handleCommitCsv()}>
-                {csvCommitting ? '提交中...' : '提交导入'}
-              </button>
-            </div>
-            {csvParseResult ? (
-              <InlineAlert
-                variant={getCsvParseVariant(csvParseResult)}
-                title="CSV 解析结果"
-                message={`有效 ${csvParseResult.recordCount} 条，跳过 ${csvParseResult.skippedCount} 条，错误 ${csvParseResult.errorCount} 条。`}
-                className="rounded-lg px-3 py-2 text-xs shadow-none"
-              />
-            ) : null}
-            {csvCommitResult ? (
-              <div className="space-y-2">
-                <InlineAlert
-                  variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
-                  title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
-                  message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
-                  className="rounded-lg px-3 py-2 text-xs shadow-none"
-                />
-                {csvCommitResult.failedCount > 0 && csvCommitResult.errors && csvCommitResult.errors.length > 0 && (
-                  <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs">
-                    <div className="font-semibold text-red-400 mb-1">失败详情（最多显示 20 条）：</div>
-                    <div className="max-h-32 overflow-auto space-y-1 text-red-300/80">
-                      {csvCommitResult.errors.map((err, idx) => (
-                        <div key={idx} className="font-mono">{err}</div>
+
+                {/* 规则列表 */}
+                {monitorRules.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-xs text-secondary">当前规则（{monitorRules.length} 条）：</div>
+                    <div className="max-h-48 overflow-auto rounded-lg border border-white/10 p-2 space-y-2">
+                      {monitorRules.map((rule) => (
+                        <div key={rule.id} className="flex items-center justify-between gap-2 text-xs bg-white/5 p-2 rounded">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-foreground font-medium">{rule.stockCode}</div>
+                            <div className="text-secondary truncate">
+                              {rule.alertType === 'price_cross' && `${rule.direction === 'above' ? '突破' : '跌破'} ${rule.price}`}
+                              {rule.alertType === 'price_change_percent' && `${rule.direction === 'up' ? '涨幅' : '跌幅'}超过 ${rule.changePct}%`}
+                              {rule.alertType === 'volume_spike' && `成交量超过 ${rule.multiplier} 倍`}
+                              {rule.description && ` - ${rule.description}`}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-secondary !px-2 !py-1 !text-[10px] shrink-0"
+                            onClick={() => handleRemoveMonitorRule(rule.id)}
+                          >
+                            删除
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
                 )}
+
+                {/* 提示信息 */}
+                {monitorEnabled && (
+                  <div className="text-[11px] text-secondary">
+                    监盘功能将在后台定时检查行情，触发告警后通过配置的通知渠道推送消息。
+                  </div>
+                )}
               </div>
-            ) : null}
-          </div>
+
+              {/* 留白区域 - 为后续自动交易功能预留 */}
+              <div className="min-h-[120px] rounded-lg border border-dashed border-white/10 flex items-center justify-center">
+                <div className="text-center text-xs text-secondary">
+                  <div className="mb-1">🚧 后续功能开发中</div>
+                  <div className="text-[10px]">自动交易 / 券商软件联通</div>
+                </div>
+              </div>
+            </div>
         </Card>
 
+        {/* 右侧：券商 CSV 导入 + 事件记录 */}
         <Card padding="md">
-          <h3 className="text-sm font-semibold text-foreground mb-3">事件记录</h3>
-          <div className="space-y-2">
+          <div className="space-y-4">
+            {/* 券商 CSV 导入区域 */}
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>
+              {!writableAccountId && (
+                <InlineAlert
+                  variant="warning"
+                  className="rounded-lg px-2 py-1 text-xs shadow-none mb-2"
+                  message="请先在右上角选择具体账户，再进行 CSV 导入。"
+                />
+              )}
+              <div className="space-y-2">
+                {brokerLoadWarning ? (
+                  <InlineAlert
+                    variant="warning"
+                    className="rounded-lg px-2 py-1 text-xs shadow-none"
+                    message={brokerLoadWarning}
+                  />
+                ) : null}
+                <div className="grid grid-cols-3 gap-2">
+                  <select className={PORTFOLIO_SELECT_CLASS} value={selectedBroker} onChange={(e) => setSelectedBroker(e.target.value)}>
+                    {brokers.length > 0 ? (
+                      brokers.map((item) => <option key={item.broker} value={item.broker}>{formatBrokerLabel(item.broker, item.displayName)}</option>)
+                    ) : (
+                      <option value="huatai">huatai（华泰）</option>
+                    )}
+                  </select>
+                  <select className={PORTFOLIO_SELECT_CLASS} value={importEventType} onChange={(e) => setImportEventType(e.target.value as 'trade' | 'cash' | 'corporate')}>
+                    <option value="trade">交易流水</option>
+                    <option value="cash">资金流水</option>
+                    <option value="corporate">公司行为</option>
+                  </select>
+                  <label className={PORTFOLIO_FILE_PICKER_CLASS}>
+                    选择 CSV
+                    <input type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                        setCsvFile(file);
+                        setCsvParseResult(null);
+                        setCsvCommitResult(null);
+                      }} />
+                  </label>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-secondary">
+                  <input id="csv-dry-run" type="checkbox" checked={csvDryRun} onChange={(e) => setCsvDryRun(e.target.checked)} />
+                  <label htmlFor="csv-dry-run">仅预演（不写入）</label>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary flex-1 h-11 text-sm" disabled={!csvFile || csvParsing} onClick={() => void handleParseCsv()}>
+                    {csvParsing ? '解析中...' : '解析文件'}
+                  </button>
+                  <button type="button" className="btn-secondary flex-1 h-11 text-sm"
+                    disabled={!csvFile || !writableAccountId || csvCommitting} onClick={() => void handleCommitCsv()}>
+                    {csvCommitting ? '提交中...' : '提交导入'}
+                  </button>
+                </div>
+                {csvParseResult ? (
+                  <InlineAlert
+                    variant={getCsvParseVariant(csvParseResult)}
+                    title="CSV 解析结果"
+                    message={`有效 ${csvParseResult.recordCount} 条，跳过 ${csvParseResult.skippedCount} 条，错误 ${csvParseResult.errorCount} 条。`}
+                    className="rounded-lg px-3 py-2 text-xs shadow-none"
+                  />
+                ) : null}
+                {csvCommitResult ? (
+                  <div className="space-y-2">
+                    <InlineAlert
+                      variant={getCsvCommitVariant(csvCommitResult, csvDryRun)}
+                      title={csvDryRun ? 'CSV 预演结果' : 'CSV 提交结果'}
+                      message={`${csvDryRun ? '预演检查' : '实际写入'}：写入 ${csvCommitResult.insertedCount} 条，重复 ${csvCommitResult.duplicateCount} 条，失败 ${csvCommitResult.failedCount} 条。`}
+                      className="rounded-lg px-3 py-2 text-xs shadow-none"
+                    />
+                    {csvCommitResult.failedCount > 0 && csvCommitResult.errors && csvCommitResult.errors.length > 0 && (
+                      <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs">
+                        <div className="font-semibold text-red-400 mb-1">失败详情（最多显示 20 条）：</div>
+                        <div className="max-h-32 overflow-auto space-y-1 text-red-300/80">
+                          {csvCommitResult.errors.map((err, idx) => (
+                            <div key={idx} className="font-mono">{err}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {/* 分隔线 */}
+            <div className="border-t border-white/10"></div>
+
+            {/* 事件记录区域 */}
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-3">事件记录</h3>
+              <div className="space-y-2">
             <div className="grid grid-cols-3 gap-2">
               <select className={PORTFOLIO_SELECT_CLASS} value={eventType} onChange={(e) => setEventType(e.target.value as EventType)}>
                 <option value="trade">交易流水</option>
                 <option value="cash">资金流水</option>
                 <option value="corporate">公司行为</option>
               </select>
-              <button type="button" className="btn-secondary text-sm" onClick={() => void loadEvents()} disabled={eventLoading}>
+              <button type="button" className="btn-secondary h-11 text-sm" onClick={() => void loadEvents()} disabled={eventLoading}>
                 {eventLoading ? '加载中...' : '刷新流水'}
               </button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => void handleExport()} disabled={exportLoading}>
+              <button type="button" className="btn-secondary h-11 text-sm" onClick={() => void handleExport()} disabled={exportLoading}>
                 {exportLoading ? '导出中...' : '导出 CSV'}
               </button>
             </div>
@@ -1550,8 +1866,11 @@ const PortfolioPage: React.FC = () => {
                 </button>
               </div>
             </div>
+              </div>
+            </div>
           </div>
         </Card>
+        </div>
       </section>
 
       <ConfirmDialog
