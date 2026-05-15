@@ -13,7 +13,6 @@ interface ReportOverviewProps {
   summary: ReportSummaryType;
   details?: ReportDetailsType;
   isHistory?: boolean;
-  hideSentiment?: boolean;
 }
 
 type BoardStatus = 'leading' | 'lagging';
@@ -78,7 +77,6 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   meta,
   summary,
   details,
-  hideSentiment = false,
 }) => {
   const reportLanguage = normalizeReportLanguage(meta.reportLanguage);
   const text = getReportText(reportLanguage);

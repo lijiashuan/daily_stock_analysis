@@ -5,8 +5,6 @@ import { ReportStrategy } from './ReportStrategy';
 import { ReportNews } from './ReportNews';
 import { ReportDetails } from './ReportDetails';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
-import { Card } from '../common';
-import { ScoreGauge } from '../common/ScoreGauge';
 
 interface ReportSummaryProps {
   data: AnalysisResult | AnalysisReport;
@@ -45,7 +43,6 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
             summary={summary}
             details={details}
             isHistory={isHistory}
-            hideSentiment={false}
           />
 
           {/* 策略点位区 */}
