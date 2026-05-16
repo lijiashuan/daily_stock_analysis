@@ -16,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.services.simulation_trading_service import get_simulation_service, SimulationTradingService
+from src.services.portfolio_service import PortfolioService
 # from src.notification import NotificationManager
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class SimulationScheduler:
     def __init__(self):
         self.scheduler = BackgroundScheduler()
         self.service = get_simulation_service()
+        self.portfolio_service = PortfolioService()  # 用于获取模拟账户
         # self.notification_manager = NotificationManager()
         
         logger.info("SimulationScheduler 初始化完成")
@@ -83,8 +85,8 @@ class SimulationScheduler:
         logger.info("="*60)
         
         try:
-            # 获取所有账户
-            accounts = self.service.list_accounts()
+            # 只获取模拟账户
+            accounts = self.portfolio_service.list_accounts(account_type="simulation")
             
             if not accounts:
                 logger.info("没有活跃的模拟账户，跳过")
@@ -93,7 +95,12 @@ class SimulationScheduler:
             suggestions = []
             
             for account in accounts:
-                logger.info(f"处理账户: {account.account_name} ({account.account_id})")
+                # 双重校验：确保是模拟账户
+                if account.get('account_type') != 'simulation':
+                    logger.warning(f"跳过非模拟账户: {account['name']} (type={account.get('account_type')})")
+                    continue
+                
+                logger.info(f"处理账户: {account['name']} (ID={account['id']})")
                 
                 # TODO: 从配置或数据库获取该账户关注的股票列表
                 # 这里暂时使用测试股票代码
@@ -103,13 +110,13 @@ class SimulationScheduler:
                     try:
                         suggestion = self.service.generate_trading_suggestion(
                             stock_code=stock_code,
-                            account_id=account.account_id,
+                            account_id=account['id'],
                             use_auction=True
                         )
                         
                         suggestions.append({
-                            'account_id': account.account_id,
-                            'account_name': account.account_name,
+                            'account_id': account['id'],
+                            'account_name': account['name'],
                             'stock_code': stock_code,
                             'suggestion': suggestion
                         })
@@ -139,19 +146,15 @@ class SimulationScheduler:
         logger.info("="*60)
         
         try:
-            accounts = self.service.list_accounts()
+            accounts = self.portfolio_service.list_accounts(account_type="simulation")
             
             for account in accounts:
-                summary = account.get_account_summary()
+                # 双重校验
+                if account.get('account_type') != 'simulation':
+                    continue
                 
-                # 检查是否有需要调整的订单
-                # TODO: 实现订单调整逻辑
-                
-                logger.info(
-                    f"账户 {account.account_name}: "
-                    f"总资产 ¥{summary['total_assets']:,.2f}, "
-                    f"盈亏 {summary['profit_loss_pct']:.2f}%"
-                )
+                # TODO: 获取账户快照并检查
+                logger.info(f"账户 {account['name']}: 检查中...")
             
             logger.info("盘中检查完成")
             
