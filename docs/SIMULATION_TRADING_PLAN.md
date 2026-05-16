@@ -1,8 +1,45 @@
 # 模拟交易系统开发计划
 
 > 创建时间: 2026-05-16  
+> 最后更新: 2026-05-16（架构调整）
 > 目标: 分阶段实现日内波段量化交易模拟系统  
 > 原则: 小步快跑、及时验证、降低风险
+
+---
+
+## 🔄 架构调整说明（2026-05-16）
+
+### 重要决策：Portfolio 与 Simulation 账户共享
+
+经过全面评估，决定采用**"共享+轻量标识"方案**，将模拟账户整合到 Portfolio 系统中：
+
+#### 核心变更
+
+1. **数据库层面**
+   - `portfolio_accounts` 表增加 `account_type` 字段（'real' / 'simulation'）
+   - 模拟账户和真实账户共用同一套表结构
+   - 通过 `account_type` 区分账户类型
+
+2. **后端层面**
+   - `SimulationTradingService` 重构为使用 `PortfolioService`
+   - 废弃独立的 `/api/v1/simulation/accounts` API
+   - 前端统一调用 Portfolio API，按 `account_type` 过滤
+
+3. **前端层面**
+   - `/portfolio` 页面增加账户类型选择（实盘/模拟）
+   - `/simulation` 页面保留，但数据来自 Portfolio API
+   - 模拟账户有明显标识（🎮 图标）
+
+#### 优势
+
+- ✅ 代码复用：只需维护一套账户 CRUD 逻辑
+- ✅ 数据一致：模拟和真实使用相同的交易规则
+- ✅ 回测便利：直接使用 Portfolio 的交易记录
+- ✅ 未来扩展：模拟账户可无缝切换到真实券商
+
+#### 实施步骤
+
+详见下方**第一阶段补充任务**。
 
 ---
 
@@ -146,6 +183,174 @@ def test_paired_trade():
 - ✅ T+1引擎（基础版）
 - ✅ 模拟交易服务
 - ✅ 单元测试覆盖率 > 70%
+
+---
+
+### 第一阶段补充：Portfolio 与 Simulation 账户整合（预计 2-3 天）
+
+**目标**: 将模拟账户整合到 Portfolio 系统，实现数据持久化和共享
+
+#### 任务清单
+
+- [ ] **1.5 数据库迁移 - 增加 account_type 字段**
+  - [ ] 修改 `src/storage.py` 中 `PortfolioAccount` 模型
+  - [ ] 添加 `account_type` 字段（String(16), default='real'）
+  - [ ] 添加 CHECK 约束和索引
+  - [ ] 编写数据库迁移脚本
+  
+  **文件**: 
+  - `src/storage.py`
+  - `scripts/migrate_add_account_type.py`（新建）
+  
+  **验收标准**:
+  - 现有账户默认 `account_type='real'`
+  - 新创建账户可指定类型
+  - 数据库查询性能不受影响
+
+- [ ] **1.6 Repository 层改造**
+  - [ ] `PortfolioRepository.create_account()` 增加 `account_type` 参数
+  - [ ] `PortfolioRepository.list_accounts()` 支持按类型过滤
+  - [ ] 更新相关查询方法
+  
+  **文件**: `src/repositories/portfolio_repo.py`
+  
+  **验收标准**:
+  - 能创建模拟账户
+  - 能分别查询实盘/模拟账户
+  - 向后兼容（不传参数时默认为 real）
+
+- [ ] **1.7 Service 层改造**
+  - [ ] `PortfolioService.create_account()` 增加 `account_type` 参数
+  - [ ] `PortfolioService.list_accounts()` 支持按类型过滤
+  - [ ] 增加账户类型校验逻辑
+  
+  **文件**: `src/services/portfolio_service.py`
+  
+  **验收标准**:
+  - API 层能正确传递 account_type
+  - 业务逻辑层有类型校验
+  - 错误提示清晰
+
+- [ ] **1.8 API 层改造**
+  - [ ] `PortfolioAccountCreateRequest` 增加 `account_type` 字段
+  - [ ] `PortfolioAccountItem` 返回 `account_type`
+  - [ ] API 文档更新
+  
+  **文件**: 
+  - `api/v1/schemas/portfolio.py`
+  - `api/v1/endpoints/portfolio.py`
+  
+  **验收标准**:
+  - Swagger 文档显示新字段
+  - 前端能正确提交和接收 account_type
+  - 默认值为 'real'
+
+- [ ] **1.9 SimulationTradingService 重构**
+  - [ ] 改为使用 `PortfolioService` 作为数据源
+  - [ ] `create_account()` 调用 Portfolio API
+  - [ ] `list_accounts()` 过滤 simulation 类型
+  - [ ] `execute_trade()` 调用 Portfolio 交易接口
+  - [ ] 保留 `SimulationAccount` 作为视图层
+  
+  **文件**: `src/services/simulation_trading_service.py`
+  
+  **验收标准**:
+  - 模拟账户创建后在 Portfolio 中可见
+  - 交易记录持久化到 portfolio_trades 表
+  - 重启服务后账户不丢失
+  - 回测能读取历史交易记录
+
+- [ ] **1.10 Scheduler 改造**
+  - [ ] `SimulationScheduler` 按 account_type 过滤账户
+  - [ ] 通知标题增加 [模拟] 标识
+  - [ ] 双重校验防止误发实盘账户
+  
+  **文件**: `src/services/simulation_scheduler.py`
+  
+  **验收标准**:
+  - 定时任务只处理模拟账户
+  - 日志中有明确的类型检查
+  - 不会给实盘账户发送模拟建议
+
+- [ ] **1.11 前端 - Portfolio 页面改造**
+  - [ ] 创建账户表单增加类型选择（Radio Group）
+  - [ ] 账户列表显示类型标识（🎮 模拟 / 💼 实盘）
+  - [ ] TypeScript 类型定义更新
+  
+  **文件**: 
+  - `apps/dsa-web/src/pages/PortfolioPage.tsx`
+  - `apps/dsa-web/src/types/portfolio.ts`
+  - `apps/dsa-web/src/api/portfolio.ts`
+  
+  **验收标准**:
+  - 用户能选择创建实盘或模拟账户
+  - 列表中清晰区分两种账户
+  - 模拟账户有视觉标识
+
+- [ ] **1.12 前端 - Simulation 页面适配**
+  - [ ] 改为调用 Portfolio API
+  - [ ] 过滤 account_type='simulation' 的账户
+  - [ ] 保持原有 UI 和交互
+  
+  **文件**: 
+  - `apps/dsa-web/src/pages/SimulationTradingPage.tsx`
+  - `apps/dsa-web/src/api/simulation.ts`（可选废弃）
+  
+  **验收标准**:
+  - 页面正常加载模拟账户
+  - 交易执行功能正常
+  - 数据持久化生效
+
+#### 测试用例
+```python
+# tests/test_portfolio_simulation_integration.py
+def test_create_simulation_account():
+    """测试创建模拟账户"""
+    service = PortfolioService()
+    account = service.create_account(
+        name="模拟-茅台日内",
+        broker="模拟券商",
+        market="cn",
+        base_currency="CNY",
+        account_type="simulation"
+    )
+    assert account['account_type'] == 'simulation'
+
+def test_list_simulation_accounts():
+    """测试列出模拟账户"""
+    service = PortfolioService()
+    accounts = service.list_accounts(account_type="simulation")
+    for acc in accounts:
+        assert acc['account_type'] == 'simulation'
+
+def test_simulation_trade_persistence():
+    """测试模拟交易持久化"""
+    # 创建模拟账户
+    account = portfolio_service.create_account(..., account_type="simulation")
+    
+    # 执行交易
+    trade = portfolio_service.record_trade(
+        account_id=account['id'],
+        symbol="600519",
+        side="buy",
+        quantity=100,
+        price=1800.0,
+        ...
+    )
+    
+    # 验证交易已保存
+    trades = portfolio_service.list_trades(account_id=account['id'])
+    assert len(trades) > 0
+    assert trades[0]['symbol'] == "600519"
+```
+
+#### 交付物
+- ✅ 数据库迁移完成（account_type 字段）
+- ✅ Portfolio 和 Simulation 后端改造完成
+- ✅ 前端两个页面适配完成
+- ✅ 定时任务安全改造完成
+- ✅ 集成测试通过
+- ✅ 文档更新（本文档 + CHANGELOG）
 
 ---
 
