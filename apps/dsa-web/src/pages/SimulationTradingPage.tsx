@@ -29,17 +29,14 @@ const SimulationTradingPage: React.FC = () => {
     try {
       const data = await portfolioApi.getAccounts(false);
       // TODO: 后端需要支持按 account_type 过滤，目前先返回所有账户
-      // 前端暂时通过名称区分（约定：包含"模拟"或"Sim"的账户为模拟账户）
-      const simulationAccounts = data.accounts.filter(acc => 
-        acc.name.includes('模拟') || acc.name.includes('Sim') || acc.name.includes('sim')
-      );
-      setAccounts(simulationAccounts);
+      // 暂时显示所有活跃账户，后续会通过 account_type 字段过滤
+      setAccounts(data.accounts);
       // 如果当前没有选中账户，自动选中第一个
-      if (!selectedAccountId && simulationAccounts.length > 0) {
-        setSelectedAccountId(simulationAccounts[0].id);
-        setSelectedAccount(simulationAccounts[0]);
+      if (!selectedAccountId && data.accounts.length > 0) {
+        setSelectedAccountId(data.accounts[0].id);
+        setSelectedAccount(data.accounts[0]);
         // 加载该账户的快照
-        await loadSnapshot(simulationAccounts[0].id);
+        await loadSnapshot(data.accounts[0].id);
       }
     } catch (error) {
       message.error('加载账户失败');
@@ -249,7 +246,7 @@ const SimulationTradingPage: React.FC = () => {
 
               <Alert
                 message="提示"
-                description="请在 /portfolio 页面创建模拟账户（名称包含'模拟'或'Sim'），系统将自动识别为模拟账户。"
+                description="请在 /portfolio 页面创建账户，所有账户都会在这里显示。后续将支持按账户类型筛选模拟账户。"
                 type="info"
                 showIcon
               />
