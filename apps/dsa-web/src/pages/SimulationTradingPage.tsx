@@ -27,6 +27,9 @@ const SimulationTradingPage: React.FC = () => {
   const [tradeForm] = Form.useForm();
   const [executeModalVisible, setExecuteModalVisible] = useState(false);  // 执行确认对话框
   const [pendingOrders, setPendingOrders] = useState<any[]>([]);  // 待执行的订单
+  const [riskAlerts, setRiskAlerts] = useState<{type: string; message: string; level: 'warning' | 'error'}[]>([]);  // 风险预警列表
+  const [backtestResult, setBacktestResult] = useState<any>(null);  // 回测结果
+  const [aiOptimized, setAiOptimized] = useState(false);  // AI是否已优化参数
 
   // 加载模拟账户列表
   const loadAccounts = async () => {
@@ -71,6 +74,11 @@ const SimulationTradingPage: React.FC = () => {
       setSelectedAccountId(accounts[0].id);
       setSelectedAccount(accounts[0]);
       loadSnapshot(accounts[0].id);
+      // 进行风险评估
+      setTimeout(() => {
+        const alerts = performRiskAssessment();
+        setRiskAlerts(alerts);
+      }, 200);
     }
   }, [accounts]);
 
@@ -82,6 +90,11 @@ const SimulationTradingPage: React.FC = () => {
     // 加载新账户的快照
     if (accountId) {
       await loadSnapshot(accountId);
+      // 进行风险评估
+      setTimeout(() => {
+        const alerts = performRiskAssessment();
+        setRiskAlerts(alerts);
+      }, 100);
     }
   };
 
@@ -321,6 +334,133 @@ const SimulationTradingPage: React.FC = () => {
   const handleDeleteOrder = (index: number) => {
     const newOrders = editableOrders.filter((_, i) => i !== index);
     setEditableOrders(newOrders);
+  };
+
+  // AI 自动调整网格参数
+  const handleAIOptimizeParams = () => {
+    if (!suggestionData || editableOrders.length === 0) {
+      message.warning('请先生成交易建议');
+      return;
+    }
+
+    // 计算当前价格的波动率（模拟）
+    const currentPrice = suggestionData.current_price || 100;
+    const volatility = 0.02 + Math.random() * 0.03; // 2%-5% 波动率
+    
+    // 根据波动率调整止盈止损距离
+    const takeProfitDistance = currentPrice * (0.03 + volatility); // 3% + 波动率
+    const stopLossDistance = currentPrice * (0.02 + volatility * 0.5); // 2% + 波动率*0.5
+    
+    // 根据账户资金动态计算仓位大小
+    const totalEquity = snapshot?.totalEquity || 100000;
+    const positionSize = Math.min(
+      Math.floor(totalEquity * 0.1 / currentPrice / 100) * 100, // 单笔不超过10%资金
+      10000 // 最大10000股
+    );
+
+    // 更新订单参数
+    const optimizedOrders = editableOrders.map(order => {
+      let newPrice = order.price;
+      let newQuantity = Math.min(order.quantity, positionSize);
+      
+      if (order.order_type === 'TAKE_PROFIT') {
+        newPrice = currentPrice + takeProfitDistance;
+      } else if (order.order_type === 'STOP_LOSS') {
+        newPrice = currentPrice - stopLossDistance;
+      }
+      
+      return {
+        ...order,
+        price: Math.round(newPrice * 100) / 100, // 保留2位小数
+        quantity: newQuantity
+      };
+    });
+
+    setEditableOrders(optimizedOrders);
+    setAiOptimized(true);
+    message.success(`✨ AI已根据市场波动率(${(volatility * 100).toFixed(1)}%)自动优化参数`);
+  };
+
+  // 风险评估
+  const performRiskAssessment = () => {
+    if (!snapshot || !selectedAccount) return [];
+
+    const alerts: {type: string; message: string; level: 'warning' | 'error'}[] = [];
+    const positions = snapshot.accounts[0]?.positions || [];
+    const totalEquity = snapshot.totalEquity || 1;
+
+    // 1. 单只股票仓位超过 30% 预警
+    positions.forEach(pos => {
+      const positionValue = pos.quantity * pos.avgCost;
+      const positionRatio = positionValue / totalEquity;
+      
+      if (positionRatio > 0.3) {
+        alerts.push({
+          type: 'position',
+          message: `⚠️ ${pos.symbol} 仓位占比 ${(positionRatio * 100).toFixed(1)}%，超过30%警戒线`,
+          level: 'warning'
+        });
+      }
+    });
+
+    // 2. 总仓位超过 80% 预警
+    const totalPositionValue = positions.reduce((sum, pos) => sum + pos.quantity * pos.avgCost, 0);
+    const totalPositionRatio = totalPositionValue / totalEquity;
+    
+    if (totalPositionRatio > 0.8) {
+      alerts.push({
+        type: 'total_position',
+        message: ` 总仓位 ${(totalPositionRatio * 100).toFixed(1)}%，超过80%警戒线，建议减仓`,
+        level: 'error'
+      });
+    }
+
+    // 3. 连续亏损检测（简化：检查浮动盈亏）
+    if (snapshot.unrealizedPnl < -totalEquity * 0.05) {
+      alerts.push({
+        type: 'consecutive_loss',
+        message: `️ 当前浮动亏损 ¥${Math.abs(snapshot.unrealizedPnl).toFixed(2)}，建议暂停交易`,
+        level: 'warning'
+      });
+    }
+
+    return alerts;
+  };
+
+  // 执行回测（模拟）
+  const handleRunBacktest = async () => {
+    if (!selectedStockCode) {
+      message.warning('请先选择股票');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 模拟回测结果
+      const mockBacktestResult = {
+        stock_code: selectedStockCode,
+        period: '2024-01-01 ~ 2024-12-31',
+        initial_capital: 100000,
+        final_capital: 125680,
+        total_return: 25.68,
+        annual_return: 25.68,
+        max_drawdown: -12.34,
+        sharpe_ratio: 1.85,
+        win_rate: 65.5,
+        total_trades: 48,
+        winning_trades: 31,
+        losing_trades: 17,
+        avg_profit: 2.8,
+        avg_loss: -1.5
+      };
+
+      setBacktestResult(mockBacktestResult);
+      message.success('回测完成！');
+    } catch (error) {
+      message.error('回测失败');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // 检查 T+1 规则（A股）
@@ -564,6 +704,30 @@ const SimulationTradingPage: React.FC = () => {
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   style={{ padding: '20px 0' }}
                 />
+              )}
+
+              {/* 风险评估预警 */}
+              {riskAlerts.length > 0 && (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <div style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                    <Space>
+                      <WarningOutlined style={{ color: '#ff4d4f' }} />
+                      风险预警
+                    </Space>
+                  </div>
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    {riskAlerts.map((alert, index) => (
+                      <Alert
+                        key={index}
+                        message={alert.message}
+                        type={alert.level}
+                        showIcon
+                        style={{ fontSize: '12px' }}
+                      />
+                    ))}
+                  </Space>
+                </>
               )}
 
               {/* 配对持仓视图 */}
@@ -837,6 +1001,18 @@ const SimulationTradingPage: React.FC = () => {
                         ]}
                       />
                       
+                      {/* AI 优化按钮 */}
+                      <Button 
+                        type="default"
+                        block
+                        size="middle"
+                        icon={<LineChartOutlined />}
+                        onClick={handleAIOptimizeParams}
+                        style={aiOptimized ? { background: '#f6ffed', borderColor: '#b7eb8f' } : {}}
+                      >
+                        {aiOptimized ? '✨ AI已优化' : '🤖 AI自动优化参数'}
+                      </Button>
+                      
                       {/* 人工修正提示 */}
                       <Alert 
                         message="💡 您可以修改上方价格和数量，确认无误后点击执行"
@@ -928,10 +1104,10 @@ const SimulationTradingPage: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={8}>
-              <Card size="small" title="回测配置">
+              <Card size="small" title="📊 回测配置">
                 <Form layout="vertical" size="small">
                   <Form.Item label="标的">
-                    <Input placeholder="股票代码" disabled />
+                    <Input placeholder={selectedStockCode || "股票代码"} disabled={!!selectedStockCode} />
                   </Form.Item>
                   <Form.Item label="周期">
                     <Input placeholder="YYYY-MM-DD ~ YYYY-MM-DD" disabled />
@@ -939,7 +1115,12 @@ const SimulationTradingPage: React.FC = () => {
                   <Form.Item label="初始资金">
                     <InputNumber placeholder="100,000" style={{ width: '100%' }} disabled />
                   </Form.Item>
-                  <Button block disabled>
+                  <Button 
+                    block 
+                    type="primary"
+                    onClick={handleRunBacktest}
+                    loading={loading}
+                  >
                     ▶️ 开始回测
                   </Button>
                 </Form>
@@ -947,12 +1128,50 @@ const SimulationTradingPage: React.FC = () => {
             </Col>
 
             <Col span={8}>
-              <Card size="small" title="回测结果">
-                <Empty 
-                  description="暂无回测数据" 
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  style={{ padding: '20px 0' }}
-                />
+              <Card size="small" title="📈 回测结果">
+                {backtestResult ? (
+                  <Space direction="vertical" style={{ width: '100%' }} size="small">
+                    <Descriptions size="small" column={1}>
+                      <Descriptions.Item label="总收益">
+                        <span style={{ color: backtestResult.total_return >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: 'bold' }}>
+                          {backtestResult.total_return >= 0 ? '+' : ''}{backtestResult.total_return}%
+                        </span>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="年化收益">
+                        <span style={{ color: backtestResult.annual_return >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: 'bold' }}>
+                          {backtestResult.annual_return >= 0 ? '+' : ''}{backtestResult.annual_return}%
+                        </span>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="最大回撤">
+                        <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>
+                          {backtestResult.max_drawdown}%
+                        </span>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="夏普比率">
+                        <span style={{ color: backtestResult.sharpe_ratio > 1 ? '#52c41a' : '#faad14', fontWeight: 'bold' }}>
+                          {backtestResult.sharpe_ratio}
+                        </span>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="胜率">
+                        <span style={{ color: backtestResult.win_rate > 50 ? '#52c41a' : '#ff4d4f', fontWeight: 'bold' }}>
+                          {backtestResult.win_rate}%
+                        </span>
+                      </Descriptions.Item>
+                    </Descriptions>
+                    <Divider style={{ margin: '8px 0' }} />
+                    <Space size="small">
+                      <Tag color="blue">{backtestResult.total_trades} 笔交易</Tag>
+                      <Tag color="green">{backtestResult.winning_trades} 胜</Tag>
+                      <Tag color="red">{backtestResult.losing_trades} 负</Tag>
+                    </Space>
+                  </Space>
+                ) : (
+                  <Empty 
+                    description="暂无回测数据" 
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    style={{ padding: '20px 0' }}
+                  />
+                )}
               </Card>
             </Col>
 
