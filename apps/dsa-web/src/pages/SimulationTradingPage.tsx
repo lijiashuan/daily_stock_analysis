@@ -5,9 +5,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Modal, Form, Input, InputNumber, message, Tag, Space } from 'antd';
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, TradeMarkOutlined } from '@ant-design/icons';
-import { simulationApi, Account, CreateAccountRequest } from '../api/simulation';
+import { Card, Button, Table, Modal, Form, Input, InputNumber, message, Tag, Space, Tabs, Row, Col, Statistic, Divider, Select, Alert } from 'antd';
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, TradeMarkOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined } from '@ant-design/icons';
+import { simulationApi, Account, CreateAccountRequest, TradingSuggestion, GridOrder } from '../api/simulation';
 
 const SimulationTradingPage: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -232,11 +232,11 @@ const SimulationTradingPage: React.FC = () => {
             name="trading_mode"
             initialValue="balanced"
           >
-            <Input.Group compact>
-              <Button style={{ width: '33%' }}>保守</Button>
-              <Button type="primary" style={{ width: '34%' }}>平衡</Button>
-              <Button style={{ width: '33%' }}>激进</Button>
-            </Input.Group>
+            <Select>
+              <Select.Option value="conservative">保守型</Select.Option>
+              <Select.Option value="balanced">平衡型</Select.Option>
+              <Select.Option value="aggressive">激进型</Select.Option>
+            </Select>
           </Form.Item>
 
           <Form.Item
@@ -244,9 +244,201 @@ const SimulationTradingPage: React.FC = () => {
             name="strategy_type"
             initialValue="grid_trading"
           >
-            <Input disabled value="网格交易（默认）" />
+            <Select>
+              <Select.Option value="grid_trading">网格交易</Select.Option>
+              <Select.Option value="intraday_swing">日内波段</Select.Option>
+              <Select.Option value="paired_trade">配对交易</Select.Option>
+            </Select>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 交易执行对话框 */}
+      <Modal
+        title={`交易执行 - ${selectedAccount?.account_name || ''}`}
+        open={tradeModalVisible}
+        onCancel={() => {
+          setTradeModalVisible(false);
+          tradeForm.resetFields();
+        }}
+        onOk={() => tradeForm.submit()}
+      >
+        {selectedAccount && (
+          <Alert
+            message={`可用资金: ¥${selectedAccount.available_cash.toLocaleString()}`}
+            type="info"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        
+        <Form
+          form={tradeForm}
+          layout="vertical"
+          onFinish={handleExecuteTrade}
+        >
+          <Form.Item
+            label="股票代码"
+            name="stock_code"
+            rules={[{ required: true, message: '请输入股票代码' }]}
+          >
+            <Input placeholder="例如：600519" />
+          </Form.Item>
+
+          <Form.Item
+            label="买卖方向"
+            name="side"
+            rules={[{ required: true, message: '请选择买卖方向' }]}
+            initialValue="BUY"
+          >
+            <Select>
+              <Select.Option value="BUY">
+                <Space>
+                  <ArrowUpOutlined style={{ color: '#52c41a' }} />
+                  <span>买入</span>
+                </Space>
+              </Select.Option>
+              <Select.Option value="SELL">
+                <Space>
+                  <ArrowDownOutlined style={{ color: '#ff4d4f' }} />
+                  <span>卖出</span>
+                </Space>
+              </Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="价格"
+            name="price"
+            rules={[{ required: true, message: '请输入价格' }]}
+          >
+            <InputNumber
+              min={0.01}
+              step={0.01}
+              precision={2}
+              style={{ width: '100%' }}
+              placeholder="100.00"
+              addonBefore="¥"
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="数量"
+            name="quantity"
+            rules={[{ required: true, message: '请输入数量' }]}
+          >
+            <InputNumber
+              min={100}
+              step={100}
+              style={{ width: '100%' }}
+              placeholder="100"
+              addonAfter="股"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 交易建议对话框 */}
+      <Modal
+        title="交易建议"
+        open={suggestionModalVisible}
+        onCancel={() => setSuggestionModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setSuggestionModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={800}
+      >
+        {suggestion && (
+          <div>
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic
+                    title="当前价格"
+                    value={suggestion.current_price}
+                    precision={2}
+                    prefix="¥"
+                  />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic
+                    title="预测范围"
+                    value={`${suggestion.predicted_range[0].toFixed(2)} - ${suggestion.predicted_range[1].toFixed(2)}`}
+                  />
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small">
+                  <Statistic
+                    title="市场情绪"
+                    value={suggestion.sentiment === 'bullish' ? '看涨' : suggestion.sentiment === 'bearish' ? '看跌' : '中性'}
+                    valueStyle={{ 
+                      color: suggestion.sentiment === 'bullish' ? '#52c41a' : suggestion.sentiment === 'bearish' ? '#ff4d4f' : '#faad14'
+                    }}
+                  />
+                </Card>
+              </Col>
+            </Row>
+
+            <Divider orientation="left">网格订单 ({suggestion.grid_orders.length}个)</Divider>
+            
+            {suggestion.grid_orders.length > 0 ? (
+              <Table
+                dataSource={suggestion.grid_orders}
+                rowKey={(record, index) => `${record.price}-${index}`}
+                pagination={false}
+                size="small"
+                columns={[
+                  {
+                    title: '价格',
+                    dataIndex: 'price',
+                    key: 'price',
+                    render: (value: number) => `¥${value.toFixed(2)}`
+                  },
+                  {
+                    title: '数量',
+                    dataIndex: 'quantity',
+                    key: 'quantity',
+                    render: (value: number) => `${value}股`
+                  },
+                  {
+                    title: '方向',
+                    dataIndex: 'side',
+                    key: 'side',
+                    render: (value: string) => (
+                      <Tag color={value === 'BUY' ? 'green' : 'red'}>
+                        {value === 'BUY' ? '买入' : '卖出'}
+                      </Tag>
+                    )
+                  },
+                  {
+                    title: '类型',
+                    dataIndex: 'order_type',
+                    key: 'order_type'
+                  },
+                  {
+                    title: '说明',
+                    dataIndex: 'notes',
+                    key: 'notes'
+                  }
+                ]}
+              />
+            ) : (
+              <Alert message="暂无网格订单" type="info" showIcon />
+            )}
+
+            <Divider />
+            <Alert
+              message="建议说明"
+              description={suggestion.suggestion}
+              type="info"
+              showIcon
+            />
+          </div>
+        )}
       </Modal>
     </div>
   );
