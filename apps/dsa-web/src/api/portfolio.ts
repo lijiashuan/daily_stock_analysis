@@ -100,9 +100,13 @@ function buildEventParams(query: EventQuery): Record<string, string | number> {
 }
 
 export const portfolioApi = {
-  async getAccounts(includeInactive = false): Promise<PortfolioAccountListResponse> {
+  async getAccounts(includeInactive = false, accountType?: string): Promise<PortfolioAccountListResponse> {
+    const params: Record<string, any> = { include_inactive: includeInactive };
+    if (accountType) {
+      params.account_type = accountType;
+    }
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/accounts', {
-      params: { include_inactive: includeInactive },
+      params,
     });
     return toCamelCase<PortfolioAccountListResponse>(response.data);
   },

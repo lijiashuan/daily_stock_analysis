@@ -27,9 +27,9 @@ const SimulationTradingPage: React.FC = () => {
   const loadAccounts = async () => {
     setLoading(true);
     try {
+      // TODO: 后续需要支持按 account_type 过滤
+      // 暂时获取所有账户，显示在账户选择器中
       const data = await portfolioApi.getAccounts(false);
-      // TODO: 后端需要支持按 account_type 过滤，目前先返回所有账户
-      // 暂时显示所有活跃账户，后续会通过 account_type 字段过滤
       setAccounts(data.accounts);
       // 如果当前没有选中账户，自动选中第一个
       if (!selectedAccountId && data.accounts.length > 0) {
@@ -246,7 +246,7 @@ const SimulationTradingPage: React.FC = () => {
 
               <Alert
                 message="提示"
-                description="请在 /portfolio 页面创建账户，所有账户都会在这里显示。后续将支持按账户类型筛选模拟账户。"
+                description="请在 /portfolio 页面创建账户，并将账户类型设置为【模拟】。"
                 type="info"
                 showIcon
               />

@@ -10,6 +10,7 @@ export interface PortfolioAccountItem {
   broker?: string | null;
   market: 'cn' | 'hk' | 'us';
   baseCurrency: string;
+  accountType?: string | null;  // 'real' | 'simulation'
   isActive: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;
