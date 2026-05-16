@@ -131,9 +131,14 @@ class SimulationTradingService:
         Returns:
             交易结果
         """
+        logger.info(f"执行交易: account_id={account_id}, stock_code={stock_code}, side={side}, price={price}, quantity={quantity}")
+        
         account = self.get_account(account_id)
         if not account:
+            logger.warning(f"账户不存在: {account_id}")
             return {"success": False, "message": "账户不存在"}
+        
+        logger.info(f"账户当前资金: {account.available_cash}, 持仓: {account.positions}")
         
         from src.schemas.simulation_models import OrderRequest, OrderSide
         
@@ -145,6 +150,8 @@ class SimulationTradingService:
         )
         
         result = account.place_order(order)
+        
+        logger.info(f"交易结果: success={result.success}, message={result.message}")
         
         return {
             "success": result.success,

@@ -16,7 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.services.simulation_trading_service import get_simulation_service, SimulationTradingService
-from src.notification import NotificationManager
+# from src.notification import NotificationManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class SimulationScheduler:
     def __init__(self):
         self.scheduler = BackgroundScheduler()
         self.service = get_simulation_service()
-        self.notification_manager = NotificationManager()
+        # self.notification_manager = NotificationManager()
         
         logger.info("SimulationScheduler 初始化完成")
     
