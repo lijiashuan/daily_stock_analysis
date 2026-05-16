@@ -92,6 +92,7 @@ def create_account(request: PortfolioAccountCreateRequest) -> PortfolioAccountIt
             market=request.market,
             base_currency=request.base_currency,
             owner_id=request.owner_id,
+            account_type=request.account_type,
         )
         return PortfolioAccountItem(**row)
     except ValueError as exc:

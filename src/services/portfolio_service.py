@@ -99,23 +99,30 @@ class PortfolioService:
         market: str,
         base_currency: str,
         owner_id: Optional[str] = None,
+        account_type: str = 'real',
     ) -> Dict[str, Any]:
         name_norm = (name or "").strip()
         if not name_norm:
             raise ValueError("name is required")
         market_norm = self._normalize_market(market)
         base_currency_norm = self._normalize_currency(base_currency)
+        
+        # Validate account_type
+        if account_type not in ('real', 'simulation'):
+            raise ValueError(f"Invalid account_type: {account_type}. Must be 'real' or 'simulation'")
+        
         row = self.repo.create_account(
             name=name_norm,
             broker=(broker or "").strip() or None,
             market=market_norm,
             base_currency=base_currency_norm,
             owner_id=(owner_id or "").strip() or None,
+            account_type=account_type,
         )
         return self._account_to_dict(row)
 
-    def list_accounts(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
-        rows = self.repo.list_accounts(include_inactive=include_inactive)
+    def list_accounts(self, include_inactive: bool = False, account_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        rows = self.repo.list_accounts(include_inactive=include_inactive, account_type=account_type)
         return [self._account_to_dict(r) for r in rows]
 
     def update_account(

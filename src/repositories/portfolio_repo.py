@@ -59,6 +59,7 @@ class PortfolioRepository:
         market: str,
         base_currency: str,
         owner_id: Optional[str] = None,
+        account_type: str = 'real',
     ) -> PortfolioAccount:
         with self.db.get_session() as session:
             row = PortfolioAccount(
@@ -67,6 +68,7 @@ class PortfolioRepository:
                 broker=broker,
                 market=market,
                 base_currency=base_currency,
+                account_type=account_type,
                 is_active=True,
             )
             session.add(row)
@@ -82,11 +84,13 @@ class PortfolioRepository:
                 include_inactive=include_inactive,
             )
 
-    def list_accounts(self, include_inactive: bool = False) -> List[PortfolioAccount]:
+    def list_accounts(self, include_inactive: bool = False, account_type: Optional[str] = None) -> List[PortfolioAccount]:
         with self.db.get_session() as session:
             query = select(PortfolioAccount)
             if not include_inactive:
                 query = query.where(PortfolioAccount.is_active.is_(True))
+            if account_type:
+                query = query.where(PortfolioAccount.account_type == account_type)
             rows = session.execute(query.order_by(PortfolioAccount.id.asc())).scalars().all()
             return list(rows)
 
