@@ -5,15 +5,21 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Table, Modal, Form, Input, InputNumber, message, Tag, Space, Tabs, Row, Col, Statistic, Divider, Select, Alert } from 'antd';
-import { PlusOutlined, DeleteOutlined, ReloadOutlined, TradeMarkOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined } from '@ant-design/icons';
-import { simulationApi, Account, CreateAccountRequest, TradingSuggestion, GridOrder } from '../api/simulation';
+import { Card, Button, Table, Modal, Form, Input, InputNumber, message, Tag, Space, Row, Col, Statistic, Divider, Select, Alert } from 'antd';
+import { PlusOutlined, DeleteOutlined, ReloadOutlined, TradeMarkOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, ClockCircleOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
+import { simulationApi, Account, CreateAccountRequest, TradingSuggestion } from '../api/simulation';
 
 const SimulationTradingPage: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(false);
   const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [tradeModalVisible, setTradeModalVisible] = useState(false);
+  const [suggestionModalVisible, setSuggestionModalVisible] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
+  const [suggestion, setSuggestion] = useState<TradingSuggestion | null>(null);
+  const [schedulerRunning, setSchedulerRunning] = useState(false);
   const [form] = Form.useForm();
+  const [tradeForm] = Form.useForm();
 
   // 加载账户列表
   const loadAccounts = async () => {
@@ -70,6 +76,85 @@ const SimulationTradingPage: React.FC = () => {
         }
       }
     });
+  };
+
+  // 打开交易对话框
+  const handleOpenTrade = (account: Account) => {
+    setSelectedAccount(account);
+    setTradeModalVisible(true);
+    tradeForm.resetFields();
+  };
+
+  // 执行交易
+  const handleExecuteTrade = async (values: any) => {
+    if (!selectedAccount) return;
+
+    try {
+      await simulationApi.executeTrade(selectedAccount.account_id, {
+        stock_code: values.stock_code,
+        side: values.side,
+        price: values.price,
+        quantity: values.quantity
+      });
+      
+      message.success('交易执行成功');
+      setTradeModalVisible(false);
+      tradeForm.resetFields();
+      loadAccounts();
+    } catch (error) {
+      message.error('交易执行失败');
+      console.error(error);
+    }
+  };
+
+  // 获取交易建议
+  const handleGetSuggestion = async () => {
+    setLoading(true);
+    try {
+      const data = await simulationApi.generateSuggestion('TEST001', true);
+      setSuggestion(data);
+      setSuggestionModalVisible(true);
+    } catch (error) {
+      message.error('获取交易建议失败');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 启动调度器
+  const handleStartScheduler = async () => {
+    try {
+      await simulationApi.startScheduler();
+      message.success('调度器已启动');
+      setSchedulerRunning(true);
+    } catch (error) {
+      message.error('启动调度器失败');
+      console.error(error);
+    }
+  };
+
+  // 停止调度器
+  const handleStopScheduler = async () => {
+    try {
+      await simulationApi.stopScheduler();
+      message.success('调度器已停止');
+      setSchedulerRunning(false);
+    } catch (error) {
+      message.error('停止调度器失败');
+      console.error(error);
+    }
+  };
+
+  // 手动触发每日建议
+  const handleTriggerDailySuggestions = async () => {
+    try {
+      await simulationApi.triggerDailySuggestions();
+      message.success('交易建议生成任务已执行');
+    } catch (error) {
+      message.error('执行失败');
+      console.error(error);
+    }
   };
 
   // 表格列定义
@@ -135,7 +220,7 @@ const SimulationTradingPage: React.FC = () => {
           <Button
             type="link"
             icon={<TradeMarkOutlined />}
-            onClick={() => message.info(`交易功能开发中...`)}
+            onClick={() => handleOpenTrade(record)}
           >
             交易
           </Button>
@@ -154,6 +239,50 @@ const SimulationTradingPage: React.FC = () => {
 
   return (
     <div style={{ padding: '24px' }}>
+      {/* 快捷操作卡片 */}
+      <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="账户总数"
+              value={accounts.length}
+              prefix={<TradeMarkOutlined />}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="总资产"
+              value={accounts.reduce((sum, acc) => sum + acc.total_assets, 0)}
+              precision={2}
+              prefix="¥"
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="总盈亏"
+              value={accounts.reduce((sum, acc) => sum + acc.profit_loss, 0)}
+              precision={2}
+              prefix="¥"
+              valueStyle={{ color: accounts.reduce((sum, acc) => sum + acc.profit_loss, 0) >= 0 ? '#3f8600' : '#cf1322' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card>
+            <Statistic
+              title="调度器"
+              value={schedulerRunning ? '运行中' : '已停止'}
+              valueStyle={{ color: schedulerRunning ? '#52c41a' : '#999' }}
+              prefix={<ClockCircleOutlined />}
+            />
+          </Card>
+        </Col>
+      </Row>
+
       <Card
         title={
           <Space>
@@ -163,6 +292,20 @@ const SimulationTradingPage: React.FC = () => {
         }
         extra={
           <Space>
+            <Button
+              type={schedulerRunning ? "default" : "primary"}
+              icon={schedulerRunning ? <StopOutlined /> : <PlayCircleOutlined />}
+              onClick={schedulerRunning ? handleStopScheduler : handleStartScheduler}
+            >
+              {schedulerRunning ? '停止调度器' : '启动调度器'}
+            </Button>
+            <Button
+              icon={<LineChartOutlined />}
+              onClick={handleTriggerDailySuggestions}
+              loading={loading}
+            >
+              生成建议
+            </Button>
             <Button
               type="primary"
               icon={<PlusOutlined />}

@@ -116,5 +116,18 @@ export const simulationApi = {
 
   // 健康检查
   healthCheck: (): Promise<{ status: string }> =>
-    axios.get(`${API_BASE}/health`).then(res => res.data)
+    axios.get(`${API_BASE}/health`).then(res => res.data),
+
+  // 调度器管理
+  startScheduler: (): Promise<{ message: string }> =>
+    axios.post(`${API_BASE}/scheduler/start`).then(res => res.data),
+
+  stopScheduler: (): Promise<{ message: string }> =>
+    axios.post(`${API_BASE}/scheduler/stop`).then(res => res.data),
+
+  triggerDailySuggestions: (): Promise<{ message: string }> =>
+    axios.post(`${API_BASE}/scheduler/daily-suggestions`).then(res => res.data),
+
+  triggerDailyReview: (): Promise<{ message: string }> =>
+    axios.post(`${API_BASE}/scheduler/daily-review`).then(res => res.data)
 };

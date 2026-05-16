@@ -12,6 +12,7 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 
 from src.services.simulation_trading_service import get_simulation_service, SimulationTradingService
+from src.services.simulation_scheduler import get_scheduler, SimulationScheduler
 
 router = APIRouter()
 
@@ -262,3 +263,51 @@ async def screen_stocks(
 async def health_check():
     """健康检查"""
     return {"status": "ok", "service": "simulation-trading"}
+
+
+@router.post("/scheduler/start", tags=["Simulation Trading"])
+async def start_scheduler(
+    scheduler: SimulationScheduler = Depends(get_scheduler)
+):
+    """启动调度器"""
+    try:
+        scheduler.start()
+        return {"message": "调度器已启动"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/scheduler/stop", tags=["Simulation Trading"])
+async def stop_scheduler(
+    scheduler: SimulationScheduler = Depends(get_scheduler)
+):
+    """停止调度器"""
+    try:
+        scheduler.stop()
+        return {"message": "调度器已停止"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/scheduler/daily-suggestions", tags=["Simulation Trading"])
+async def trigger_daily_suggestions(
+    scheduler: SimulationScheduler = Depends(get_scheduler)
+):
+    """手动触发每日交易建议生成"""
+    try:
+        scheduler.generate_daily_suggestions()
+        return {"message": "交易建议生成任务已执行"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/scheduler/daily-review", tags=["Simulation Trading"])
+async def trigger_daily_review(
+    scheduler: SimulationScheduler = Depends(get_scheduler)
+):
+    """手动触发每日复盘报告生成"""
+    try:
+        scheduler.generate_daily_review()
+        return {"message": "复盘报告生成任务已执行"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
