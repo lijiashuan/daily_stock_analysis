@@ -6,8 +6,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Form, Input, InputNumber, message, Space, Row, Col, Statistic, Divider, Select, Alert, Empty, Descriptions, Modal, Tabs, Table, Tag } from 'antd';
-import { ReloadOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, PlayCircleOutlined, StopOutlined, RiseOutlined, FallOutlined, StarOutlined, SearchOutlined } from '@ant-design/icons';
+import { Card, Button, Form, Input, InputNumber, message, Space, Row, Col, Statistic, Divider, Select, Alert, Empty, Descriptions, Modal, Tabs, Table, Tag, Tooltip, Popconfirm } from 'antd';
+import { ReloadOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, PlayCircleOutlined, StopOutlined, RiseOutlined, FallOutlined, SearchOutlined, InfoCircleOutlined, LinkOutlined, WarningOutlined } from '@ant-design/icons';
 import { portfolioApi } from '../api/portfolio';
 import type { PortfolioAccountItem, PortfolioSnapshotResponse } from '../types/portfolio';
 const { TabPane } = Tabs;
@@ -25,6 +25,8 @@ const SimulationTradingPage: React.FC = () => {
   const [selectedStockCode, setSelectedStockCode] = useState<string>('');  // 当前选定的股票代码
   const [editableOrders, setEditableOrders] = useState<any[]>([]);  // 可编辑的订单列表
   const [tradeForm] = Form.useForm();
+  const [executeModalVisible, setExecuteModalVisible] = useState(false);  // 执行确认对话框
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);  // 待执行的订单
 
   // 加载模拟账户列表
   const loadAccounts = async () => {
@@ -80,6 +82,20 @@ const SimulationTradingPage: React.FC = () => {
     // 加载新账户的快照
     if (accountId) {
       await loadSnapshot(accountId);
+    }
+  };
+
+  // 设置当前操作标的
+  const handleSetSelectedStock = (stockCode: string) => {
+    setSelectedStockCode(stockCode);
+    message.success(`已选定 ${stockCode} 为当前操作标的`);
+  };
+
+  // 搜索股票（手动输入）
+  const handleStockSearch = (value: string) => {
+    if (value) {
+      setSelectedStockCode(value);
+      message.success(`已选定 ${value} 为当前操作标的`);
     }
   };
 
@@ -159,9 +175,15 @@ const SimulationTradingPage: React.FC = () => {
   // 获取交易建议（调用 simulation API）
   const handleGetSuggestion = async () => {
     console.log('[handleGetSuggestion] selectedAccount:', selectedAccount);
+    console.log('[handleGetSuggestion] selectedStockCode:', selectedStockCode);
     
     if (!selectedAccount) {
       message.warning('请先选择账户');
+      return;
+    }
+
+    if (!selectedStockCode) {
+      message.warning('请先在选股区选择股票');
       return;
     }
 
@@ -174,7 +196,7 @@ const SimulationTradingPage: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          stock_code: '600519',  // 可以改为让用户输入
+          stock_code: selectedStockCode,  // 使用用户选定的股票
           use_auction: true
         })
       });
@@ -190,9 +212,9 @@ const SimulationTradingPage: React.FC = () => {
       const data = await response.json();
       console.log('[handleGetSuggestion] Suggestion data:', data);
       
-      // 保存数据并显示对话框
+      // 保存数据并设置可编辑订单
       setSuggestionData(data);
-      setSuggestionModalVisible(true);
+      setEditableOrders(data.grid_orders || []);
       message.success(`交易建议生成成功！生成了 ${data.grid_orders?.length || 0} 个网格订单`);
     } catch (error) {
       console.error('[handleGetSuggestion] Error:', error);
@@ -283,44 +305,15 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
-  // 执行今日交易计划
-  const handleExecuteDailyPlan = async () => {
-    console.log('[handleExecuteDailyPlan] Executing daily plan...');
-    try {
-      const response = await fetch('/api/v1/simulation/scheduler/execute-daily-plan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          orders: editableOrders
-        })
-      });
-      
-      console.log('[handleExecuteDailyPlan] Response status:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[handleExecuteDailyPlan] Error:', errorText);
-        throw new Error(`执行交易计划失败: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('[handleExecuteDailyPlan] Response:', data);
-      message.success('今日交易计划已执行');
-      
-      // 重新加载账户快照
-      await loadSnapshot(selectedAccount?.id || 0);
-    } catch (error) {
-      console.error('[handleExecuteDailyPlan] Error:', error);
-      message.error(error instanceof Error ? error.message : '执行失败');
-    }
+  // 执行今日交易计划（改为打开确认对话框）
+  const handleExecuteDailyPlan = () => {
+    handleOpenExecuteConfirm();
   };
 
   // 修改订单
   const handleOrderChange = (index: number, field: string, value: any) => {
     const newOrders = [...editableOrders];
-    newOrders[index][field] = value;
+    newOrders[index] = { ...newOrders[index], [field]: value };
     setEditableOrders(newOrders);
   };
 
@@ -328,6 +321,101 @@ const SimulationTradingPage: React.FC = () => {
   const handleDeleteOrder = (index: number) => {
     const newOrders = editableOrders.filter((_, i) => i !== index);
     setEditableOrders(newOrders);
+  };
+
+  // 检查 T+1 规则（A股）
+  const checkT1Rule = (order: any): { valid: boolean; message: string } => {
+    if (!selectedAccount) return { valid: true, message: '' };
+    
+    // 只对 A股执行 T+1 检查
+    if (selectedAccount.market !== 'A') {
+      return { valid: true, message: '' };
+    }
+
+    // 卖出操作需要检查 T+1
+    if (order.side === 'SELL') {
+      // 查找该股票的持仓
+      const position = snapshot?.accounts[0].positions.find(
+        pos => pos.symbol === selectedStockCode
+      );
+      
+      if (!position) {
+        return { valid: false, message: `❌ ${selectedStockCode} 无持仓，无法卖出` };
+      }
+
+      // 检查是否有今日买入的记录（简化逻辑：假设今天买入的不可卖出）
+      // 实际应从后端获取今日交易记录
+      const today = new Date().toISOString().split('T')[0];
+      // TODO: 从后端获取今日买入记录
+      // const todayBuyRecords = await getTodayBuyRecords(selectedAccount.id, selectedStockCode, today);
+      // if (todayBuyRecords.length > 0) {
+      //   return { valid: false, message: `⚠️ A股 T+1 规则：今日买入的 ${selectedStockCode} 需明日才能卖出` };
+      // }
+    }
+
+    return { valid: true, message: '' };
+  };
+
+  // 打开执行确认对话框
+  const handleOpenExecuteConfirm = () => {
+    if (!selectedAccount || !selectedStockCode) {
+      message.warning('请先选择账户和股票');
+      return;
+    }
+
+    if (editableOrders.length === 0) {
+      message.warning('没有可执行的订单');
+      return;
+    }
+
+    // 检查 T+1 规则
+    const t1Issues = editableOrders
+      .map(order => checkT1Rule(order))
+      .filter(result => !result.valid);
+
+    if (t1Issues.length > 0) {
+      message.warning(t1Issues[0].message);
+      return;
+    }
+
+    setPendingOrders(editableOrders);
+    setExecuteModalVisible(true);
+  };
+
+  // 确认执行交易计划
+  const handleConfirmExecute = async () => {
+    setLoading(true);
+    try {
+      // 批量执行所有订单
+      for (const order of pendingOrders) {
+        await portfolioApi.createTrade({
+          accountId: selectedAccount!.id,
+          symbol: selectedStockCode,
+          tradeDate: new Date().toISOString().split('T')[0],
+          side: order.side.toLowerCase(),
+          quantity: order.quantity,
+          price: order.price,
+          fee: 0,
+          tax: 0,
+          market: selectedAccount!.market,
+          currency: selectedAccount!.baseCurrency,
+          note: `网格交易 - ${order.order_type}`
+        });
+      }
+      
+      message.success(`✅ 成功执行 ${pendingOrders.length} 个订单`);
+      setPendingOrders([]);
+      setEditableOrders([]);
+      setSuggestionData(null);
+      setExecuteModalVisible(false);
+      await loadSnapshot(selectedAccount!.id);
+    } catch (error: any) {
+      console.error('[handleConfirmExecute] Error:', error);
+      const errorMsg = error?.response?.data?.detail || error?.message || '执行失败';
+      message.error(errorMsg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -434,11 +522,17 @@ const SimulationTradingPage: React.FC = () => {
                         <th style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'right' }}>数量</th>
                         <th style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'right' }}>成本</th>
                         <th style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'right' }}>盈亏</th>
+                        <th style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'center' }}>操作</th>
                       </tr>
                     </thead>
                     <tbody>
                       {snapshot.accounts[0].positions.map((pos) => (
-                        <tr key={pos.symbol}>
+                        <tr 
+                          key={pos.symbol}
+                          style={{ 
+                            background: selectedStockCode === pos.symbol ? '#e6f7ff' : 'transparent'
+                          }}
+                        >
                           <td style={{ padding: '6px', border: '1px solid #d9d9d9' }}>{pos.symbol}</td>
                           <td style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'right' }}>{pos.quantity}</td>
                           <td style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'right' }}>¥{pos.avgCost.toFixed(2)}</td>
@@ -449,6 +543,15 @@ const SimulationTradingPage: React.FC = () => {
                             color: pos.unrealizedPnlBase >= 0 ? '#52c41a' : '#ff4d4f'
                           }}>
                             ¥{pos.unrealizedPnlBase.toFixed(2)}
+                          </td>
+                          <td style={{ padding: '6px', border: '1px solid #d9d9d9', textAlign: 'center' }}>
+                            <Button 
+                              size="small" 
+                              type={selectedStockCode === pos.symbol ? 'primary' : 'default'}
+                              onClick={() => handleSetSelectedStock(pos.symbol)}
+                            >
+                              {selectedStockCode === pos.symbol ? '当前' : '设为标的'}
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -462,70 +565,157 @@ const SimulationTradingPage: React.FC = () => {
                   style={{ padding: '20px 0' }}
                 />
               )}
+
+              {/* 配对持仓视图 */}
+              {snapshot && snapshot.accounts.length > 0 && snapshot.accounts[0].positions.length > 1 && (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <div style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                    <Space>
+                      <LinkOutlined style={{ color: '#1890ff' }} />
+                      配对持仓
+                    </Space>
+                  </div>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    {snapshot.accounts[0].positions.map((pos, index) => (
+                      <div 
+                        key={pos.symbol}
+                        style={{
+                          padding: '8px',
+                          marginBottom: index < snapshot.accounts[0].positions.length - 1 ? '8px' : '0',
+                          background: selectedStockCode === pos.symbol ? '#e6f7ff' : '#fafafa',
+                          border: '1px solid #d9d9d9',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        <Row justify="space-between" align="middle">
+                          <Col>
+                            <Space>
+                              <Tag color={selectedStockCode === pos.symbol ? 'blue' : 'default'}>
+                                {pos.symbol}
+                              </Tag>
+                              <span style={{ fontSize: '12px', color: '#666' }}>
+                                {pos.quantity}股 @ ¥{pos.avgCost.toFixed(2)}
+                              </span>
+                            </Space>
+                          </Col>
+                          <Col>
+                            <span style={{ 
+                              fontSize: '12px', 
+                              fontWeight: 'bold',
+                              color: pos.unrealizedPnlBase >= 0 ? '#52c41a' : '#ff4d4f'
+                            }}>
+                              ¥{pos.unrealizedPnlBase.toFixed(2)}
+                            </span>
+                          </Col>
+                        </Row>
+                      </div>
+                    ))}
+                    
+                    {/* 配对总盈亏 */}
+                    <div style={{
+                      marginTop: '8px',
+                      padding: '8px',
+                      background: '#f0f5ff',
+                      border: '1px dashed #91d5ff',
+                      borderRadius: '4px',
+                      textAlign: 'center'
+                    }}>
+                      <Space>
+                        <span style={{ fontSize: '12px', color: '#666' }}>配对总盈亏:</span>
+                        <span style={{ 
+                          fontSize: '14px', 
+                          fontWeight: 'bold',
+                          color: snapshot.unrealizedPnl >= 0 ? '#52c41a' : '#ff4d4f'
+                        }}>
+                          ¥{snapshot.unrealizedPnl.toFixed(2)}
+                        </span>
+                      </Space>
+                    </div>
+                  </div>
+                </>
+              )}
             </Space>
           </Card>
         </Col>
 
         {/* 中间：选股区 (35%) */}
         <Col xs={24} lg={8}>
-          <Card title="🎯 选股区" style={{ height: '100%' }}>
+          <Card title=" 选股区" style={{ height: '100%' }}>
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <Alert
-                message="功能开发中"
-                description="此区域将提供智能选股、股票筛选、深度分析等功能。后续会集成选股器 API，支持多维度评分和候选池管理。"
-                type="info"
-                showIcon
-              />
-
-              <Divider style={{ margin: '12px 0' }} />
-
-              {/* 筛选条件（占位） */}
-              <div style={{ fontWeight: 'bold', marginBottom: 8 }}>筛选条件</div>
-              <Form layout="vertical" size="small">
-                <Form.Item label="市场">
-                  <Select placeholder="选择市场" disabled>
-                    <Select.Option value="A">A股</Select.Option>
-                    <Select.Option value="HK">港股</Select.Option>
-                    <Select.Option value="US">美股</Select.Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item label="评分范围">
-                  <InputNumber placeholder="最低评分" style={{ width: '100%' }} disabled />
-                </Form.Item>
-                <Form.Item label="趋势类型">
-                  <Select placeholder="选择趋势" disabled>
-                    <Select.Option value="bullish">多头排列</Select.Option>
-                    <Select.Option value="bearish">空头排列</Select.Option>
-                  </Select>
-                </Form.Item>
-                <Button block disabled>
-                  🔍 开始筛选
-                </Button>
-              </Form>
-
-              <Divider style={{ margin: '12px 0' }} />
-
-              {/* 候选股票列表（占位） */}
-              <div style={{ fontWeight: 'bold', marginBottom: 8 }}>候选股票列表</div>
-              <Empty 
-                description="暂无候选股票" 
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                style={{ padding: '20px 0' }}
-              />
+              <Tabs defaultActiveKey="manual">
+                <TabPane tab="手动输入" key="manual">
+                  <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                    <div>
+                      <div style={{ marginBottom: 8, fontWeight: 'bold' }}>输入股票代码：</div>
+                      <Input.Search
+                        placeholder="例如：600519"
+                        enterButton="确定"
+                        onSearch={handleStockSearch}
+                        prefix={<SearchOutlined />}
+                      />
+                    </div>
+                    
+                    {selectedStockCode && (
+                      <Alert
+                        message={`✅ 已选定: ${selectedStockCode}`}
+                        type="success"
+                        showIcon
+                        action={
+                          <Button size="small" onClick={() => setSelectedStockCode('')}>
+                            清除
+                          </Button>
+                        }
+                      />
+                    )}
+                    
+                    <Alert
+                      message="提示"
+                      description="直接输入股票代码，或切换到'智能推荐'查看AI分析的股票。"
+                      type="info"
+                      showIcon
+                    />
+                  </Space>
+                </TabPane>
+                
+                <TabPane tab="智能推荐" key="ai">
+                  <Alert
+                    message="功能开发中"
+                    description="此区域将提供智能选股、股票筛选、深度分析等功能。"
+                    type="info"
+                    showIcon
+                  />
+                  <Divider style={{ margin: '12px 0' }} />
+                  <div style={{ fontWeight: 'bold', marginBottom: 8 }}>筛选条件</div>
+                  <Form layout="vertical" size="small">
+                    <Form.Item label="市场">
+                      <Select placeholder="选择市场" disabled>
+                        <Select.Option value="A">A股</Select.Option>
+                        <Select.Option value="HK">港股</Select.Option>
+                        <Select.Option value="US">美股</Select.Option>
+                      </Select>
+                    </Form.Item>
+                    <Button block disabled>🔍 开始筛选</Button>
+                  </Form>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <div style={{ fontWeight: 'bold', marginBottom: 8 }}>候选股票列表</div>
+                  <Empty description="暂无候选股票" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                </TabPane>
+              </Tabs>
 
               <Divider style={{ margin: '12px 0' }} />
 
               {/* 已选标的 */}
-              <div style={{ fontWeight: 'bold', marginBottom: 8 }}>✅ 已选标的</div>
-              {selectedAccount ? (
+              <div style={{ fontWeight: 'bold', marginBottom: 8 }}>✅ 当前操作标的</div>
+              {selectedStockCode ? (
                 <Alert
-                  message="请先在上方选股区选择股票"
-                  type="info"
+                  message={`${selectedStockCode} - 点击交易执行区的"生成交易建议"按钮获取策略`}
+                  type="success"
                   showIcon
                 />
               ) : (
                 <Alert
-                  message="请先选择账户"
+                  message="请先在上方选择股票"
                   type="warning"
                   showIcon
                 />
@@ -875,99 +1065,104 @@ const SimulationTradingPage: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* 交易建议对话框 */}
+      {/* 交易建议对话框（已弃用，改为页面内展示） */}
+      {/* 交易执行确认对话框 */}
       <Modal
-        title="交易建议"
-        open={suggestionModalVisible}
+        title="🚀 确认执行交易计划"
+        open={executeModalVisible}
         onCancel={() => {
-          setSuggestionModalVisible(false);
-          setSuggestionData(null);
+          setExecuteModalVisible(false);
+          setPendingOrders([]);
         }}
-        footer={[
-          <Button key="close" onClick={() => {
-            setSuggestionModalVisible(false);
-            setSuggestionData(null);
-          }}>
-            关闭
-          </Button>
-        ]}
-        width={800}
+        onOk={handleConfirmExecute}
+        okText="确认执行"
+        cancelText="取消"
+        okButtonProps={{ danger: true, loading }}
+        width={700}
       >
-        {suggestionData ? (
-          <div>
-            <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="股票代码">{suggestionData.stock_code}</Descriptions.Item>
-              <Descriptions.Item label="当前价格">¥{suggestionData.current_price?.toFixed(2)}</Descriptions.Item>
-              <Descriptions.Item label="市场情绪">
-                <span style={{ 
-                  color: suggestionData.sentiment === 'bullish' ? '#52c41a' : 
-                         suggestionData.sentiment === 'bearish' ? '#ff4d4f' : '#999'
-                }}>
-                  {suggestionData.sentiment === 'bullish' ? '看涨' : 
-                   suggestionData.sentiment === 'bearish' ? '看跌' : '中性'}
-                </span>
-              </Descriptions.Item>
-              <Descriptions.Item label="网格订单数">{suggestionData.grid_orders?.length || 0} 个</Descriptions.Item>
-            </Descriptions>
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Alert
+            message={`⚠️ 即将执行以下交易（${selectedAccount?.market === 'A' ? 'A股 T+1 规则适用' : '无 T+1 限制'}）`}
+            description={`标的: ${selectedStockCode} | 订单数量: ${pendingOrders.length} 个`}
+            type="warning"
+            showIcon
+          />
 
-            <Divider>网格订单详情</Divider>
-            
-            {suggestionData.grid_orders && suggestionData.grid_orders.length > 0 ? (
-              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f5f5f5' }}>
-                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'left' }}>类型</th>
-                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>价格</th>
-                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>数量</th>
-                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'left' }}>方向</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {suggestionData.grid_orders.map((order: any, index: number) => (
-                      <tr key={index}>
-                        <td style={{ padding: '8px', border: '1px solid #d9d9d9' }}>
-                          <span style={{
-                            color: order.order_type === 'ENTRY' ? '#1890ff' :
-                                   order.order_type === 'TAKE_PROFIT' ? '#52c41a' : '#ff4d4f',
-                            fontWeight: 'bold'
-                          }}>
-                            {order.order_type === 'ENTRY' ? '建仓' :
-                             order.order_type === 'TAKE_PROFIT' ? '止盈' : '止损'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>
-                          ¥{order.price?.toFixed(2)}
-                        </td>
-                        <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>
-                          {order.quantity} 股
-                        </td>
-                        <td style={{ padding: '8px', border: '1px solid #d9d9d9' }}>
-                          <span style={{
-                            color: order.side === 'BUY' ? '#52c41a' : '#ff4d4f'
-                          }}>
-                            {order.side === 'BUY' ? '买入 ↑' : '卖出 ↓'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <Empty description="暂无网格订单" />
-            )}
+          {/* 订单预览 */}
+          <div style={{ fontWeight: 'bold', marginBottom: 8 }}>📋 订单预览</div>
+          <Table
+            dataSource={pendingOrders}
+            rowKey={(_, index) => index || 0}
+            pagination={false}
+            size="small"
+            scroll={{ y: 300 }}
+            columns={[
+              {
+                title: '类型',
+                dataIndex: 'order_type',
+                width: 80,
+                render: (type) => (
+                  <Tag color={
+                    type === 'ENTRY' ? 'blue' :
+                    type === 'TAKE_PROFIT' ? 'green' : 'red'
+                  }>
+                    {type === 'ENTRY' ? '建仓' : type === 'TAKE_PROFIT' ? '止盈' : '止损'}
+                  </Tag>
+                )
+              },
+              {
+                title: '价格',
+                dataIndex: 'price',
+                width: 100,
+                render: (val) => <span style={{ fontWeight: 'bold' }}>¥{val?.toFixed(2)}</span>
+              },
+              {
+                title: '数量',
+                dataIndex: 'quantity',
+                width: 80,
+                render: (val) => <span>{val} 股</span>
+              },
+              {
+                title: '方向',
+                dataIndex: 'side',
+                width: 80,
+                render: (side) => (
+                  <span style={{ color: side === 'BUY' ? '#52c41a' : '#ff4d4f', fontWeight: 'bold' }}>
+                    {side === 'BUY' ? '买入 ↑' : '卖出 ↓'}
+                  </span>
+                )
+              },
+              {
+                title: '金额',
+                dataIndex: 'price',
+                width: 100,
+                render: (price, record) => (
+                  <span style={{ fontWeight: 'bold' }}>¥{(price * record.quantity).toFixed(2)}</span>
+                )
+              }
+            ]}
+          />
 
-            {suggestionData.suggestion && (
-              <>
-                <Divider>交易建议</Divider>
-                <Alert message={suggestionData.suggestion} type="info" showIcon />
-              </>
-            )}
-          </div>
-        ) : (
-          <Empty description="暂无交易建议数据" />
-        )}
+          {/* T+1 规则提示 */}
+          {selectedAccount?.market === 'A' && (
+            <Alert
+              message="📌 A股 T+1 规则提醒"
+              description="今日买入的股票需明日才能卖出。如果订单中有卖出操作，请确保不是今日买入的。"
+              type="info"
+              showIcon
+              icon={<InfoCircleOutlined />}
+            />
+          )}
+
+          {/* 风险提示 */}
+          <Alert
+            message="⚠️ 风险提示"
+            description="交易执行后无法撤销，请仔细检查以上订单信息。确认无误后点击“确认执行”按钮。"
+            type="error"
+            showIcon
+            icon={<WarningOutlined />}
+          />
+        </Space>
       </Modal>
     </div>
   );
