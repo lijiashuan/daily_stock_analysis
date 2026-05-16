@@ -8,12 +8,14 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Form, Input, InputNumber, message, Space, Row, Col, Statistic, Divider, Select, Alert, Empty, Descriptions, Modal } from 'antd';
 import { ReloadOutlined, TrademarkOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, ClockCircleOutlined, PlayCircleOutlined, StopOutlined, RiseOutlined, FallOutlined } from '@ant-design/icons';
-import { simulationApi, type Account, type TradingSuggestion } from '../api/simulation';
+import { portfolioApi } from '../api/portfolio';
+import type { PortfolioAccountItem, PortfolioSnapshotResponse } from '../types/portfolio';
 
 const SimulationTradingPage: React.FC = () => {
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>(undefined);
-  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
+  const [accounts, setAccounts] = useState<PortfolioAccountItem[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | undefined>(undefined);
+  const [selectedAccount, setSelectedAccount] = useState<PortfolioAccountItem | null>(null);
+  const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
   const [suggestionModalVisible, setSuggestionModalVisible] = useState(false);
@@ -21,16 +23,23 @@ const SimulationTradingPage: React.FC = () => {
   const [schedulerRunning, setSchedulerRunning] = useState(false);
   const [tradeForm] = Form.useForm();
 
-  // 加载账户列表
+  // 加载模拟账户列表
   const loadAccounts = async () => {
     setLoading(true);
     try {
-      const data = await simulationApi.listAccounts();
-      setAccounts(data);
+      const data = await portfolioApi.getAccounts(false);
+      // TODO: 后端需要支持按 account_type 过滤，目前先返回所有账户
+      // 前端暂时通过名称区分（约定：包含"模拟"或"Sim"的账户为模拟账户）
+      const simulationAccounts = data.accounts.filter(acc => 
+        acc.name.includes('模拟') || acc.name.includes('Sim') || acc.name.includes('sim')
+      );
+      setAccounts(simulationAccounts);
       // 如果当前没有选中账户，自动选中第一个
-      if (!selectedAccountId && data.length > 0) {
-        setSelectedAccountId(data[0].account_id);
-        setSelectedAccount(data[0]);
+      if (!selectedAccountId && simulationAccounts.length > 0) {
+        setSelectedAccountId(simulationAccounts[0].id);
+        setSelectedAccount(simulationAccounts[0]);
+        // 加载该账户的快照
+        await loadSnapshot(simulationAccounts[0].id);
       }
     } catch (error) {
       message.error('加载账户失败');
@@ -40,15 +49,29 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
+  // 加载账户快照
+  const loadSnapshot = async (accountId: number) => {
+    try {
+      const snap = await portfolioApi.getSnapshot({ accountId });
+      setSnapshot(snap);
+    } catch (error) {
+      console.error('加载快照失败:', error);
+    }
+  };
+
   useEffect(() => {
     loadAccounts();
   }, []);
 
   // 账户选择变化
-  const handleAccountChange = (accountId: string) => {
+  const handleAccountChange = async (accountId: number) => {
     setSelectedAccountId(accountId);
-    const account = accounts.find(a => a.account_id === accountId);
+    const account = accounts.find(a => a.id === accountId);
     setSelectedAccount(account || null);
+    // 加载新账户的快照
+    if (accountId) {
+      await loadSnapshot(accountId);
+    }
   };
 
   // 打开交易对话框
@@ -66,27 +89,26 @@ const SimulationTradingPage: React.FC = () => {
     if (!selectedAccount) return;
 
     try {
-      const result = await simulationApi.executeTrade(selectedAccount.account_id, {
-        stock_code: values.stock_code,
-        side: values.side,
+      // 使用 Portfolio API 创建交易记录
+      const result = await portfolioApi.createTrade({
+        accountId: selectedAccount.id,
+        symbol: values.stock_code,
+        tradeDate: new Date().toISOString().split('T')[0], // 今天日期 YYYY-MM-DD
+        side: values.side.toLowerCase(), // 'buy' or 'sell'
+        quantity: values.quantity,
         price: values.price,
-        quantity: values.quantity
+        fee: 0, // TODO: 根据券商计算手续费
+        tax: 0, // TODO: 根据市场计算税费
+        market: selectedAccount.market,
+        currency: selectedAccount.baseCurrency,
+        note: `模拟交易 - ${values.side === 'BUY' ? '买入' : '卖出'}`
       });
       
-      if (result.success) {
-        message.success(`交易成功: ${result.message}`);
-        setTradeModalVisible(false);
-        tradeForm.resetFields();
-        // 重新加载账户信息
-        const updatedAccounts = await simulationApi.listAccounts();
-        setAccounts(updatedAccounts);
-        const updatedAccount = updatedAccounts.find(a => a.account_id === selectedAccount.account_id);
-        if (updatedAccount) {
-          setSelectedAccount(updatedAccount);
-        }
-      } else {
-        message.error(`交易失败: ${result.message}`);
-      }
+      message.success(`交易成功: ID=${result.id}`);
+      setTradeModalVisible(false);
+      tradeForm.resetFields();
+      // 重新加载账户快照
+      await loadSnapshot(selectedAccount.id);
     } catch (error: any) {
       const errorMsg = error?.response?.data?.detail || '交易执行失败';
       message.error(errorMsg);
@@ -94,7 +116,7 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
-  // 获取交易建议
+  // 获取交易建议（暂时保留 simulation API）
   const handleGetSuggestion = async () => {
     if (!selectedAccount) {
       message.warning('请先选择账户');
@@ -103,9 +125,11 @@ const SimulationTradingPage: React.FC = () => {
 
     setLoading(true);
     try {
-      const data = await simulationApi.generateSuggestion('TEST001', true);
-      setSuggestion(data);
-      setSuggestionModalVisible(true);
+      // TODO: 需要实现基于 Portfolio 的交易建议生成
+      message.info('交易建议功能开发中...');
+      // const data = await simulationApi.generateSuggestion('TEST001', true);
+      // setSuggestion(data);
+      // setSuggestionModalVisible(true);
     } catch (error) {
       message.error('获取交易建议失败');
       console.error(error);
@@ -114,12 +138,14 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
-  // 启动调度器
+  // 启动调度器（暂时保留 simulation API）
   const handleStartScheduler = async () => {
     try {
-      await simulationApi.startScheduler();
-      message.success('调度器已启动');
-      setSchedulerRunning(true);
+      // TODO: 需要实现基于 Portfolio 的调度器
+      message.info('调度器功能开发中...');
+      // await simulationApi.startScheduler();
+      // message.success('调度器已启动');
+      // setSchedulerRunning(true);
     } catch (error) {
       message.error('启动调度器失败');
       console.error(error);
@@ -129,9 +155,10 @@ const SimulationTradingPage: React.FC = () => {
   // 停止调度器
   const handleStopScheduler = async () => {
     try {
-      await simulationApi.stopScheduler();
-      message.success('调度器已停止');
-      setSchedulerRunning(false);
+      message.info('调度器功能开发中...');
+      // await simulationApi.stopScheduler();
+      // message.success('调度器已停止');
+      // setSchedulerRunning(false);
     } catch (error) {
       message.error('停止调度器失败');
       console.error(error);
@@ -141,8 +168,9 @@ const SimulationTradingPage: React.FC = () => {
   // 手动触发每日建议
   const handleTriggerDailySuggestions = async () => {
     try {
-      await simulationApi.triggerDailySuggestions();
-      message.success('交易建议生成任务已执行');
+      message.info('每日建议功能开发中...');
+      // await simulationApi.triggerDailySuggestions();
+      // message.success('交易建议生成任务已执行');
     } catch (error) {
       message.error('执行失败');
       console.error(error);
@@ -157,7 +185,7 @@ const SimulationTradingPage: React.FC = () => {
           <Card>
             <Statistic
               title="可用资金"
-              value={selectedAccount?.available_cash || 0}
+              value={snapshot?.totalCash || 0}
               precision={2}
               prefix="¥"
               valueStyle={{ color: '#1890ff' }}
@@ -168,7 +196,7 @@ const SimulationTradingPage: React.FC = () => {
           <Card>
             <Statistic
               title="总资产"
-              value={selectedAccount?.total_assets || 0}
+              value={snapshot?.totalEquity || 0}
               precision={2}
               prefix="¥"
             />
@@ -178,11 +206,11 @@ const SimulationTradingPage: React.FC = () => {
           <Card>
             <Statistic
               title="浮动盈亏"
-              value={selectedAccount?.profit_loss || 0}
+              value={snapshot?.unrealizedPnl || 0}
               precision={2}
-              prefix={selectedAccount && selectedAccount.profit_loss >= 0 ? <RiseOutlined /> : <FallOutlined />}
+              prefix={snapshot && snapshot.unrealizedPnl >= 0 ? <RiseOutlined /> : <FallOutlined />}
               valueStyle={{ 
-                color: selectedAccount && selectedAccount.profit_loss >= 0 ? '#52c41a' : '#ff4d4f' 
+                color: snapshot && snapshot.unrealizedPnl >= 0 ? '#52c41a' : '#ff4d4f' 
               }}
             />
           </Card>
@@ -213,15 +241,15 @@ const SimulationTradingPage: React.FC = () => {
                   style={{ width: '100%' }}
                   placeholder="请选择账户"
                   options={accounts.map(acc => ({
-                    label: `${acc.account_name} (¥${acc.available_cash.toLocaleString()})`,
-                    value: acc.account_id
+                    label: `${acc.name} (${acc.market.toUpperCase()})`,
+                    value: acc.id
                   }))}
                 />
               </div>
 
               <Alert
                 message="提示"
-                description="账户管理功能已移至 /portfolio 页面，您可以在那里创建、删除账户和管理资金。"
+                description="请在 /portfolio 页面创建模拟账户（名称包含'模拟'或'Sim'），系统将自动识别为模拟账户。"
                 type="info"
                 showIcon
               />
@@ -256,34 +284,46 @@ const SimulationTradingPage: React.FC = () => {
         {/* 右侧：持仓详情 */}
         <Col span={16}>
           <Card title="持仓详情">
-            {selectedAccount ? (
+            {selectedAccount && snapshot ? (
               <>
                 <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
-                  <Descriptions.Item label="账户名称">{selectedAccount.account_name}</Descriptions.Item>
-                  <Descriptions.Item label="初始资金">¥{selectedAccount.initial_capital.toLocaleString()}</Descriptions.Item>
-                  <Descriptions.Item label="可用资金">¥{selectedAccount.available_cash.toLocaleString()}</Descriptions.Item>
-                  <Descriptions.Item label="总资产">¥{selectedAccount.total_assets.toLocaleString()}</Descriptions.Item>
-                  <Descriptions.Item label="浮动盈亏">
-                    <span style={{ color: selectedAccount.profit_loss >= 0 ? '#52c41a' : '#ff4d4f' }}>
-                      ¥{selectedAccount.profit_loss.toLocaleString()} ({selectedAccount.profit_loss_pct.toFixed(2)}%)
+                  <Descriptions.Item label="账户名称">{selectedAccount.name}</Descriptions.Item>
+                  <Descriptions.Item label="市场">{selectedAccount.market.toUpperCase()}</Descriptions.Item>
+                  <Descriptions.Item label="基础货币">{selectedAccount.baseCurrency}</Descriptions.Item>
+                  <Descriptions.Item label="可用资金">¥{snapshot.totalCash.toLocaleString()}</Descriptions.Item>
+                  <Descriptions.Item label="总市值">¥{snapshot.totalMarketValue.toLocaleString()}</Descriptions.Item>
+                  <Descriptions.Item label="总权益">¥{snapshot.totalEquity.toLocaleString()}</Descriptions.Item>
+                  <Descriptions.Item label="实现盈亏">
+                    <span style={{ color: snapshot.realizedPnl >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                      ¥{snapshot.realizedPnl.toLocaleString()}
                     </span>
                   </Descriptions.Item>
-                  <Descriptions.Item label="交易次数">{selectedAccount.trade_count}</Descriptions.Item>
+                  <Descriptions.Item label="未实现盈亏">
+                    <span style={{ color: snapshot.unrealizedPnl >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                      ¥{snapshot.unrealizedPnl.toLocaleString()}
+                    </span>
+                  </Descriptions.Item>
                 </Descriptions>
 
                 <Divider>持仓列表</Divider>
                 
-                {Object.entries(selectedAccount.positions).length > 0 ? (
+                {snapshot.accounts.length > 0 && snapshot.accounts[0].positions.length > 0 ? (
                   <Row gutter={[16, 16]}>
-                    {Object.entries(selectedAccount.positions).map(([code, qty]) => (
-                      <Col span={8} key={code}>
+                    {snapshot.accounts[0].positions.map((pos) => (
+                      <Col span={8} key={pos.symbol}>
                         <Card size="small">
                           <Statistic
-                            title={code}
-                            value={qty}
+                            title={pos.symbol}
+                            value={pos.quantity}
                             suffix="股"
                             valueStyle={{ color: '#1890ff' }}
                           />
+                          <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                            成本: ¥{pos.avgCost.toFixed(2)}
+                          </div>
+                          <div style={{ fontSize: '12px', color: pos.unrealizedPnlBase >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                            盈亏: ¥{pos.unrealizedPnlBase.toFixed(2)}
+                          </div>
                         </Card>
                       </Col>
                     ))}
