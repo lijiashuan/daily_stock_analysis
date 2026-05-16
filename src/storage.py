@@ -407,12 +407,14 @@ class PortfolioAccount(Base):
     broker = Column(String(64))
     market = Column(String(8), nullable=False, default='cn', index=True)  # cn/hk/us
     base_currency = Column(String(8), nullable=False, default='CNY')
+    account_type = Column(String(16), nullable=False, default='real')  # real/simulation
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     __table_args__ = (
         Index('ix_portfolio_account_owner_active', 'owner_id', 'is_active'),
+        Index('ix_portfolio_account_type', 'account_type'),
     )
 
 
