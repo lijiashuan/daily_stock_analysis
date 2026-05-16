@@ -10,7 +10,8 @@ export interface PortfolioAccountItem {
   broker?: string | null;
   market: 'cn' | 'hk' | 'us';
   baseCurrency: string;
-  accountType?: string | null;  // 'real' | 'simulation'
+  accountType?: string | null;  // 'real' | 'simulation' (camelCase)
+  account_type?: string | null;  // 'real' | 'simulation' (snake_case, 后端原始字段)
   isActive: boolean;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -26,6 +27,7 @@ export interface PortfolioAccountCreateRequest {
   market: 'cn' | 'hk' | 'us';
   baseCurrency: string;
   ownerId?: string;
+  accountType?: 'real' | 'simulation';
 }
 
 export interface PortfolioPositionItem {

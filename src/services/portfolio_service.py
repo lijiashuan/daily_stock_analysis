@@ -1777,6 +1777,7 @@ class PortfolioService:
             "broker": row.broker,
             "market": row.market,
             "base_currency": row.base_currency,
+            "account_type": row.account_type if hasattr(row, 'account_type') else 'real',
             "is_active": bool(row.is_active),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,

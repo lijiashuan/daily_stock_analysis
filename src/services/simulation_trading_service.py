@@ -122,6 +122,128 @@ class SimulationTradingService:
             logger.error(f"删除账户失败: {e}")
             return False
     
+    # ==================== 账户统计 ====================
+    
+    def get_account_statistics(self, account_id: int) -> Dict:
+        """
+        获取账户统计信息（实时计算）
+        
+        Args:
+            account_id: 账户ID
+        
+        Returns:
+            统计字典，包含：
+            - initial_capital: 初始资金
+            - available_cash: 可用资金
+            - total_assets: 总资产
+            - profit_loss: 盈亏
+            - profit_loss_pct: 盈亏百分比
+            - positions: 持仓字典 {symbol: quantity}
+            - trade_count: 交易次数
+        """
+        try:
+            # 1. 获取现金流水（分页获取所有）
+            all_ledgers = []
+            page = 1
+            page_size = 100
+            
+            while True:
+                result = self.portfolio_service.list_cash_ledger_events(
+                    account_id=account_id,
+                    page=page,
+                    page_size=page_size
+                )
+                all_ledgers.extend(result['items'])
+                
+                if len(all_ledgers) >= result['total'] or not result['items']:
+                    break
+                page += 1
+            
+            # 2. 计算初始资金和可用资金
+            initial_capital = 0.0
+            total_deposits = 0.0
+            total_withdrawals = 0.0
+            
+            for ledger in all_ledgers:
+                if '初始资金' in ledger.get('note', ''):
+                    initial_capital += ledger['amount']
+                if ledger['direction'] == 'in':
+                    total_deposits += ledger['amount']
+                else:
+                    total_withdrawals += ledger['amount']
+            
+            available_cash = total_deposits - total_withdrawals
+            
+            # 3. 获取交易记录（分页获取所有）
+            all_trades = []
+            page = 1
+            
+            while True:
+                result = self.portfolio_service.list_trade_events(
+                    account_id=account_id,
+                    page=page,
+                    page_size=page_size
+                )
+                all_trades.extend(result['items'])
+                
+                if len(all_trades) >= result['total'] or not result['items']:
+                    break
+                page += 1
+            
+            # 4. 计算持仓
+            positions = {}
+            
+            for trade in all_trades:
+                symbol = trade['symbol']
+                quantity = trade['quantity']
+                side = trade['side']
+                
+                if side == 'buy':
+                    # 买入：增加持仓
+                    positions[symbol] = positions.get(symbol, 0) + quantity
+                else:
+                    # 卖出：减少持仓
+                    positions[symbol] = positions.get(symbol, 0) - quantity
+                    
+                    # 如果持仓为0或负数，删除该键
+                    if positions[symbol] <= 0:
+                        del positions[symbol]
+            
+            # 5. 计算总资产和盈亏
+            # 简化版：总资产 = 可用资金（忽略持仓市值）
+            # TODO: 如果需要更精确，应该获取当前价格计算持仓市值
+            total_assets = available_cash
+            
+            # 盈亏 = 可用资金 - 初始资金
+            profit_loss = available_cash - initial_capital if initial_capital > 0 else 0.0
+            profit_loss_pct = (profit_loss / initial_capital * 100) if initial_capital > 0 else 0.0
+            
+            # 6. 交易次数
+            trade_count = len(all_trades)
+            
+            return {
+                'initial_capital': initial_capital,
+                'available_cash': available_cash,
+                'total_assets': total_assets,
+                'profit_loss': profit_loss,
+                'profit_loss_pct': profit_loss_pct,
+                'positions': positions,
+                'trade_count': trade_count
+            }
+            
+        except Exception as e:
+            logger.error(f"获取账户统计失败: {e}")
+            # 返回默认值
+            return {
+                'initial_capital': 0.0,
+                'available_cash': 0.0,
+                'total_assets': 0.0,
+                'profit_loss': 0.0,
+                'profit_loss_pct': 0.0,
+                'positions': {},
+                'trade_count': 0
+            }
+    
     # ==================== 交易执行 ====================
     
     def execute_trade(

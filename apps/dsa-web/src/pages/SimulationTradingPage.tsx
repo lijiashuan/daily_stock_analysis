@@ -19,20 +19,19 @@ const SimulationTradingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [tradeModalVisible, setTradeModalVisible] = useState(false);
   const [suggestionModalVisible, setSuggestionModalVisible] = useState(false);
-  const [suggestion, setSuggestion] = useState<TradingSuggestion | null>(null);
-  const [schedulerRunning, setSchedulerRunning] = useState(false);
+  const [suggestionData, setSuggestionData] = useState<any>(null);  // 存储交易建议数据
+  const [schedulerRunning, setSchedulerRunning] = useState(false);  // 调度器运行状态
   const [tradeForm] = Form.useForm();
 
   // 加载模拟账户列表
   const loadAccounts = async () => {
     setLoading(true);
     try {
-      // TODO: 后续需要支持按 account_type 过滤
-      // 暂时获取所有账户，显示在账户选择器中
-      const data = await portfolioApi.getAccounts(false);
+      // 只获取 account_type='simulation' 的账户
+      const data = await portfolioApi.getAccounts(false, 'simulation');
       setAccounts(data.accounts);
-      // 如果当前没有选中账户，自动选中第一个
-      if (!selectedAccountId && data.accounts.length > 0) {
+      // 如果有账户，自动选中第一个
+      if (data.accounts.length > 0) {
         setSelectedAccountId(data.accounts[0].id);
         setSelectedAccount(data.accounts[0]);
         // 加载该账户的快照
@@ -56,9 +55,19 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
+  // 组件挂载时加载账户
   useEffect(() => {
     loadAccounts();
   }, []);
+
+  // 当账户列表加载完成后，选中第一个账户并加载快照
+  useEffect(() => {
+    if (accounts.length > 0 && !selectedAccountId) {
+      setSelectedAccountId(accounts[0].id);
+      setSelectedAccount(accounts[0]);
+      loadSnapshot(accounts[0].id);
+    }
+  }, [accounts]);
 
   // 账户选择变化
   const handleAccountChange = async (accountId: number) => {
@@ -71,19 +80,49 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
+  // 检查调度器状态
+  const checkSchedulerStatus = async () => {
+    try {
+      const response = await fetch('/api/v1/simulation/scheduler/status');
+      if (response.ok) {
+        const data = await response.json();
+        setSchedulerRunning(data.running || false);
+        console.log('[checkSchedulerStatus] Status:', data);
+      }
+    } catch (error) {
+      console.error('[checkSchedulerStatus] Error:', error);
+    }
+  };
+
+  // 组件挂载时检查调度器状态
+  useEffect(() => {
+    checkSchedulerStatus();
+  }, []);
+
   // 打开交易对话框
   const handleOpenTrade = () => {
+    console.log('[handleOpenTrade] selectedAccount:', selectedAccount);
+    console.log('[handleOpenTrade] selectedAccountId:', selectedAccountId);
+    console.log('[handleOpenTrade] accounts:', accounts);
+    
     if (!selectedAccount) {
       message.warning('请先选择账户');
       return;
     }
+    console.log('[handleOpenTrade] Opening trade modal...');
     setTradeModalVisible(true);
     tradeForm.resetFields();
   };
 
   // 执行交易
   const handleExecuteTrade = async (values: any) => {
-    if (!selectedAccount) return;
+    console.log('[handleExecuteTrade] Form values:', values);
+    console.log('[handleExecuteTrade] selectedAccount:', selectedAccount);
+    
+    if (!selectedAccount) {
+      message.error('未选择账户');
+      return;
+    }
 
     try {
       // 使用 Portfolio API 创建交易记录
@@ -101,20 +140,23 @@ const SimulationTradingPage: React.FC = () => {
         note: `模拟交易 - ${values.side === 'BUY' ? '买入' : '卖出'}`
       });
       
+      console.log('[handleExecuteTrade] Trade result:', result);
       message.success(`交易成功: ID=${result.id}`);
       setTradeModalVisible(false);
       tradeForm.resetFields();
       // 重新加载账户快照
       await loadSnapshot(selectedAccount.id);
     } catch (error: any) {
-      const errorMsg = error?.response?.data?.detail || '交易执行失败';
+      console.error('[handleExecuteTrade] Trade error:', error);
+      const errorMsg = error?.response?.data?.detail || error?.message || '交易执行失败';
       message.error(errorMsg);
-      console.error('Trade error:', error);
     }
   };
 
-  // 获取交易建议（暂时保留 simulation API）
+  // 获取交易建议（调用 simulation API）
   const handleGetSuggestion = async () => {
+    console.log('[handleGetSuggestion] selectedAccount:', selectedAccount);
+    
     if (!selectedAccount) {
       message.warning('请先选择账户');
       return;
@@ -122,55 +164,119 @@ const SimulationTradingPage: React.FC = () => {
 
     setLoading(true);
     try {
-      // TODO: 需要实现基于 Portfolio 的交易建议生成
-      message.info('交易建议功能开发中...');
-      // const data = await simulationApi.generateSuggestion('TEST001', true);
-      // setSuggestion(data);
-      // setSuggestionModalVisible(true);
+      // 调用后端 simulation API 生成交易建议
+      const response = await fetch('/api/v1/simulation/suggestions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          stock_code: '600519',  // 可以改为让用户输入
+          use_auction: true
+        })
+      });
+      
+      console.log('[handleGetSuggestion] Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[handleGetSuggestion] Error response:', errorText);
+        throw new Error(`生成交易建议失败: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[handleGetSuggestion] Suggestion data:', data);
+      
+      // 保存数据并显示对话框
+      setSuggestionData(data);
+      setSuggestionModalVisible(true);
+      message.success(`交易建议生成成功！生成了 ${data.grid_orders?.length || 0} 个网格订单`);
     } catch (error) {
-      message.error('获取交易建议失败');
-      console.error(error);
+      console.error('[handleGetSuggestion] Error:', error);
+      message.error(error instanceof Error ? error.message : '获取交易建议失败');
     } finally {
       setLoading(false);
     }
   };
 
-  // 启动调度器（暂时保留 simulation API）
+  // 启动调度器（调用 simulation API）
   const handleStartScheduler = async () => {
+    console.log('[handleStartScheduler] Starting scheduler...');
     try {
-      // TODO: 需要实现基于 Portfolio 的调度器
-      message.info('调度器功能开发中...');
-      // await simulationApi.startScheduler();
-      // message.success('调度器已启动');
-      // setSchedulerRunning(true);
+      const response = await fetch('/api/v1/simulation/scheduler/start', {
+        method: 'POST',
+      });
+      
+      console.log('[handleStartScheduler] Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[handleStartScheduler] Error:', errorText);
+        throw new Error(`启动调度器失败: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[handleStartScheduler] Response:', data);
+      message.success('调度器已启动');
+      
+      // 刷新状态
+      await checkSchedulerStatus();
     } catch (error) {
-      message.error('启动调度器失败');
-      console.error(error);
+      console.error('[handleStartScheduler] Error:', error);
+      message.error(error instanceof Error ? error.message : '启动调度器失败');
     }
   };
 
-  // 停止调度器
+  // 停止调度器（调用 simulation API）
   const handleStopScheduler = async () => {
+    console.log('[handleStopScheduler] Stopping scheduler...');
     try {
-      message.info('调度器功能开发中...');
-      // await simulationApi.stopScheduler();
-      // message.success('调度器已停止');
-      // setSchedulerRunning(false);
+      const response = await fetch('/api/v1/simulation/scheduler/stop', {
+        method: 'POST',
+      });
+      
+      console.log('[handleStopScheduler] Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[handleStopScheduler] Error:', errorText);
+        throw new Error(`停止调度器失败: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[handleStopScheduler] Response:', data);
+      message.success('调度器已停止');
+      
+      // 刷新状态
+      await checkSchedulerStatus();
     } catch (error) {
-      message.error('停止调度器失败');
-      console.error(error);
+      console.error('[handleStopScheduler] Error:', error);
+      message.error(error instanceof Error ? error.message : '停止调度器失败');
     }
   };
 
-  // 手动触发每日建议
+  // 手动触发每日建议（调用 simulation API）
   const handleTriggerDailySuggestions = async () => {
+    console.log('[handleTriggerDailySuggestions] Triggering daily suggestions...');
     try {
-      message.info('每日建议功能开发中...');
-      // await simulationApi.triggerDailySuggestions();
-      // message.success('交易建议生成任务已执行');
+      const response = await fetch('/api/v1/simulation/scheduler/daily-suggestions', {
+        method: 'POST',
+      });
+      
+      console.log('[handleTriggerDailySuggestions] Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[handleTriggerDailySuggestions] Error:', errorText);
+        throw new Error(`触发每日建议失败: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('[handleTriggerDailySuggestions] Response:', data);
+      message.success('交易建议生成任务已执行');
     } catch (error) {
-      message.error('执行失败');
-      console.error(error);
+      console.error('[handleTriggerDailySuggestions] Error:', error);
+      message.error(error instanceof Error ? error.message : '执行失败');
     }
   };
 
@@ -345,34 +451,47 @@ const SimulationTradingPage: React.FC = () => {
 
       {/* 调度器管理 */}
       <Card title="调度器管理">
-        <Space>
-          <Button
-            type={schedulerRunning ? "default" : "primary"}
-            icon={schedulerRunning ? <StopOutlined /> : <PlayCircleOutlined />}
-            onClick={schedulerRunning ? handleStopScheduler : handleStartScheduler}
-          >
-            {schedulerRunning ? '停止调度器' : '启动调度器'}
-          </Button>
-          <Button
-            icon={<LineChartOutlined />}
-            onClick={handleTriggerDailySuggestions}
-            loading={loading}
-          >
-            触发每日建议
-          </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={loadAccounts}
-            loading={loading}
-          >
-            刷新账户
-          </Button>
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          {/* 状态显示 */}
+          <Alert
+            message={`调度器状态: ${schedulerRunning ? '运行中' : '已停止'}`}
+            type={schedulerRunning ? 'success' : 'warning'}
+            showIcon
+          />
+          
+          {/* 按钮组 */}
+          <Space>
+            <Button
+              type={schedulerRunning ? "default" : "primary"}
+              icon={schedulerRunning ? <StopOutlined /> : <PlayCircleOutlined />}
+              onClick={schedulerRunning ? handleStopScheduler : handleStartScheduler}
+            >
+              {schedulerRunning ? '停止调度器' : '启动调度器'}
+            </Button>
+            <Button
+              icon={<LineChartOutlined />}
+              onClick={handleTriggerDailySuggestions}
+              loading={loading}
+            >
+              触发每日建议
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                checkSchedulerStatus();
+                loadAccounts();
+              }}
+              loading={loading}
+            >
+              刷新状态
+            </Button>
+          </Space>
         </Space>
       </Card>
 
       {/* 交易执行对话框 */}
       <Modal
-        title={`交易执行 - ${selectedAccount?.account_name || ''}`}
+        title={`交易执行 - ${selectedAccount?.name || ''}`}
         open={tradeModalVisible}
         onCancel={() => {
           setTradeModalVisible(false);
@@ -382,7 +501,7 @@ const SimulationTradingPage: React.FC = () => {
       >
         {selectedAccount && (
           <Alert
-            message={`可用资金: ¥${selectedAccount.available_cash.toLocaleString()}`}
+            message={`市场: ${selectedAccount.market.toUpperCase()} | 货币: ${selectedAccount.baseCurrency}`}
             type="info"
             style={{ marginBottom: 16 }}
           />
@@ -458,64 +577,94 @@ const SimulationTradingPage: React.FC = () => {
       <Modal
         title="交易建议"
         open={suggestionModalVisible}
-        onCancel={() => setSuggestionModalVisible(false)}
+        onCancel={() => {
+          setSuggestionModalVisible(false);
+          setSuggestionData(null);
+        }}
         footer={[
-          <Button key="close" onClick={() => setSuggestionModalVisible(false)}>
+          <Button key="close" onClick={() => {
+            setSuggestionModalVisible(false);
+            setSuggestionData(null);
+          }}>
             关闭
           </Button>
         ]}
         width={800}
       >
-        {suggestion && (
+        {suggestionData ? (
           <div>
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic
-                    title="当前价格"
-                    value={suggestion.current_price}
-                    precision={2}
-                    prefix="¥"
-                  />
-                </Card>
-              </Col>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic
-                    title="预测范围"
-                    value={`${suggestion.predicted_range[0].toFixed(2)} - ${suggestion.predicted_range[1].toFixed(2)}`}
-                  />
-                </Card>
-              </Col>
-              <Col span={8}>
-                <Card size="small">
-                  <Statistic
-                    title="市场情绪"
-                    value={suggestion.sentiment === 'bullish' ? '看涨' : suggestion.sentiment === 'bearish' ? '看跌' : '中性'}
-                    valueStyle={{ 
-                      color: suggestion.sentiment === 'bullish' ? '#52c41a' : suggestion.sentiment === 'bearish' ? '#ff4d4f' : '#faad14'
-                    }}
-                  />
-                </Card>
-              </Col>
-            </Row>
+            <Descriptions bordered column={2} size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="股票代码">{suggestionData.stock_code}</Descriptions.Item>
+              <Descriptions.Item label="当前价格">¥{suggestionData.current_price?.toFixed(2)}</Descriptions.Item>
+              <Descriptions.Item label="市场情绪">
+                <span style={{ 
+                  color: suggestionData.sentiment === 'bullish' ? '#52c41a' : 
+                         suggestionData.sentiment === 'bearish' ? '#ff4d4f' : '#999'
+                }}>
+                  {suggestionData.sentiment === 'bullish' ? '看涨' : 
+                   suggestionData.sentiment === 'bearish' ? '看跌' : '中性'}
+                </span>
+              </Descriptions.Item>
+              <Descriptions.Item label="网格订单数">{suggestionData.grid_orders?.length || 0} 个</Descriptions.Item>
+            </Descriptions>
 
-            <Divider>网格订单 ({suggestion.grid_orders.length}个)</Divider>
+            <Divider>网格订单详情</Divider>
             
-            {suggestion.grid_orders.length > 0 ? (
-              <Alert message="网格订单功能开发中..." type="info" showIcon />
+            {suggestionData.grid_orders && suggestionData.grid_orders.length > 0 ? (
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f5f5f5' }}>
+                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'left' }}>类型</th>
+                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>价格</th>
+                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>数量</th>
+                      <th style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'left' }}>方向</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suggestionData.grid_orders.map((order: any, index: number) => (
+                      <tr key={index}>
+                        <td style={{ padding: '8px', border: '1px solid #d9d9d9' }}>
+                          <span style={{
+                            color: order.order_type === 'ENTRY' ? '#1890ff' :
+                                   order.order_type === 'TAKE_PROFIT' ? '#52c41a' : '#ff4d4f',
+                            fontWeight: 'bold'
+                          }}>
+                            {order.order_type === 'ENTRY' ? '建仓' :
+                             order.order_type === 'TAKE_PROFIT' ? '止盈' : '止损'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>
+                          ¥{order.price?.toFixed(2)}
+                        </td>
+                        <td style={{ padding: '8px', border: '1px solid #d9d9d9', textAlign: 'right' }}>
+                          {order.quantity} 股
+                        </td>
+                        <td style={{ padding: '8px', border: '1px solid #d9d9d9' }}>
+                          <span style={{
+                            color: order.side === 'BUY' ? '#52c41a' : '#ff4d4f'
+                          }}>
+                            {order.side === 'BUY' ? '买入 ↑' : '卖出 ↓'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <Alert message="暂无网格订单" type="info" showIcon />
+              <Empty description="暂无网格订单" />
             )}
 
-            <Divider />
-            <Alert
-              message="建议说明"
-              description={suggestion.suggestion}
-              type="info"
-              showIcon
-            />
+            {suggestionData.suggestion && (
+              <>
+                <Divider>交易建议</Divider>
+                <Alert message={suggestionData.suggestion} type="info" showIcon />
+              </>
+            )}
           </div>
+        ) : (
+          <Empty description="暂无交易建议数据" />
         )}
       </Modal>
     </div>

@@ -109,10 +109,11 @@ def create_account(request: PortfolioAccountCreateRequest) -> PortfolioAccountIt
 )
 def list_accounts(
     include_inactive: bool = Query(False, description="Whether to include inactive accounts"),
+    account_type: Optional[str] = Query(None, description="Filter by account type: real/simulation"),
 ) -> PortfolioAccountListResponse:
     service = PortfolioService()
     try:
-        rows = service.list_accounts(include_inactive=include_inactive)
+        rows = service.list_accounts(include_inactive=include_inactive, account_type=account_type)
         return PortfolioAccountListResponse(accounts=[PortfolioAccountItem(**item) for item in rows])
     except Exception as exc:
         raise _internal_error("List accounts failed", exc)

@@ -117,8 +117,8 @@ def test_account():
     
     print(f"\n1. 账户信息:")
     print(f"  账户ID: {account.account_id}")
-    print(f"  初始资金: ¥{account.initial_capital:,.2f}")
-    print(f"  可用资金: ¥{account.available_cash:,.2f}")
+    print(f"  初始资金: {account.initial_capital:,.2f} CNY")
+    print(f"  可用资金: {account.available_cash:,.2f} CNY")
     
     # 测试买入
     print("\n2. 测试买入...")
@@ -132,7 +132,7 @@ def test_account():
     result = account.place_order(order)
     print(f"  订单结果: {'成功' if result.success else '失败'}")
     print(f"  消息: {result.message}")
-    print(f"  剩余资金: ¥{account.available_cash:,.2f}")
+    print(f"  剩余资金: {account.available_cash:,.2f} CNY")
     print(f"  持仓: {account.positions}")
     
     # 测试卖出
@@ -147,14 +147,14 @@ def test_account():
     result = account.place_order(order)
     print(f"  订单结果: {'成功' if result.success else '失败'}")
     print(f"  消息: {result.message}")
-    print(f"  剩余资金: ¥{account.available_cash:,.2f}")
+    print(f"  剩余资金: {account.available_cash:,.2f} CNY")
     print(f"  持仓: {account.positions}")
     
     # 获取账户摘要
     print("\n4. 账户摘要:")
     summary = account.get_account_summary()
-    print(f"  总资产: ¥{summary['total_assets']:,.2f}")
-    print(f"  盈亏: ¥{summary['profit_loss']:,.2f} ({summary['profit_loss_pct']:.2f}%)")
+    print(f"  总资产: {summary['total_assets']:,.2f} CNY")
+    print(f"  盈亏: {summary['profit_loss']:,.2f} CNY ({summary['profit_loss_pct']:.2f}%)")
     print(f"  交易次数: {summary['trade_count']}")
 
 
@@ -192,7 +192,7 @@ def test_paired_trade():
     if group:
         print(f"  ✓ 形成配对")
         print(f"  配对数量: {group.total_sell_quantity}")
-        print(f"  盈亏: ¥{group.total_profit:.2f}")
+        print(f"  盈亏: {group.total_profit:.2f} CNY")
     
     # 添加第二个卖单（完全配对）
     print("\n3. 添加第二个卖单（完全配对）...")
@@ -208,16 +208,16 @@ def test_paired_trade():
         print(f"  ✓ 完全配对")
         print(f"  总买入: {group.total_buy_quantity}")
         print(f"  总卖出: {group.total_sell_quantity}")
-        print(f"  平均买价: ¥{group.avg_buy_price:.2f}")
-        print(f"  平均卖价: ¥{group.avg_sell_price:.2f}")
-        print(f"  总盈亏: ¥{group.total_profit:.2f}")
+        print(f"  平均买价: {group.avg_buy_price:.2f} CNY")
+        print(f"  平均卖价: {group.avg_sell_price:.2f} CNY")
+        print(f"  总盈亏: {group.total_profit:.2f} CNY")
         print(f"  收益率: {group.profit_pct:.2f}%")
     
     # 获取统计
     print("\n4. 统计信息:")
     stats = manager.get_statistics()
     print(f"  已完成交易组: {stats['completed_groups']}")
-    print(f"  总盈亏: ¥{stats['total_profit']:.2f}")
+    print(f"  总盈亏: {stats['total_profit']:.2f} CNY")
     print(f"  胜率: {stats['win_rate']:.1f}%")
 
 

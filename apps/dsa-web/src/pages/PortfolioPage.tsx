@@ -200,6 +200,7 @@ const PortfolioPage: React.FC = () => {
     broker: 'Demo',
     market: 'cn' as 'cn' | 'hk' | 'us',
     baseCurrency: 'CNY',
+    accountType: 'real' as 'real' | 'simulation',
   });
   const [costMethod, setCostMethod] = useState<PortfolioCostMethod>('fifo');
   const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
@@ -795,6 +796,7 @@ const PortfolioPage: React.FC = () => {
         broker: accountForm.broker.trim() || undefined,
         market: accountForm.market,
         baseCurrency: accountForm.baseCurrency.trim() || 'CNY',
+        accountType: accountForm.accountType,
       });
       await loadAccounts();
       setSelectedAccount(created.id);
@@ -805,6 +807,7 @@ const PortfolioPage: React.FC = () => {
         broker: 'Demo',
         market: accountForm.market,
         baseCurrency: accountForm.baseCurrency,
+        accountType: 'real',
       });
       setAccountCreateSuccess('账户创建成功，已自动切换到该账户。');
     } catch (err) {
@@ -1140,6 +1143,14 @@ const PortfolioPage: React.FC = () => {
               <option value="cn">市场：A 股（cn）</option>
               <option value="hk">市场：港股（hk）</option>
               <option value="us">市场：美股（us）</option>
+            </select>
+            <select
+              className={PORTFOLIO_SELECT_CLASS}
+              value={accountForm.accountType}
+              onChange={(e) => setAccountForm((prev) => ({ ...prev, accountType: e.target.value as 'real' | 'simulation' }))}
+            >
+              <option value="real">账户类型：真实账户</option>
+              <option value="simulation">账户类型：模拟账户</option>
             </select>
             <button type="submit" className="btn-secondary text-sm" disabled={accountCreating}>
               {accountCreating ? '创建中...' : '创建账户'}

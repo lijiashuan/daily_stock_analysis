@@ -54,8 +54,8 @@ def test_create_account():
     print(f"[OK] 状态码: {response.status_code}")
     print(f"[OK] 账户ID: {data['account_id']}")
     print(f"[OK] 账户名称: {data['account_name']}")
-    print(f"[OK] 初始资金: ¥{data['initial_capital']:,.2f}")
-    print(f"[OK] 可用资金: ¥{data['available_cash']:,.2f}")
+    print(f"[OK] 初始资金: {data['initial_capital']:,.2f} CNY")
+    print(f"[OK] 可用资金: {data['available_cash']:,.2f} CNY")
     
     return data['account_id']
 
@@ -96,8 +96,8 @@ def test_get_account(account_id: str):
     data = response.json()
     
     print(f"[OK] 状态码: {response.status_code}")
-    print(f"[OK] 总资产: ¥{data['total_assets']:,.2f}")
-    print(f"[OK] 盈亏: ¥{data['profit_loss']:,.2f} ({data['profit_loss_pct']:.2f}%)")
+    print(f"[OK] 总资产: {data['total_assets']:,.2f} CNY")
+    print(f"[OK] 盈亏: {data['profit_loss']:,.2f} CNY ({data['profit_loss_pct']:.2f}%)")
 
 
 def test_execute_trade(account_id: str):

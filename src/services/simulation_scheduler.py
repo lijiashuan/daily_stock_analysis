@@ -39,6 +39,10 @@ class SimulationScheduler:
     
     def start(self):
         """启动调度器"""
+        if self.scheduler.running:
+            logger.warning("调度器已在运行中")
+            return {"status": "already_running", "message": "调度器已在运行中"}
+        
         # 1. 每日 9:00 生成交易建议（开盘前）
         self.scheduler.add_job(
             func=self.generate_daily_suggestions,
@@ -68,11 +72,33 @@ class SimulationScheduler:
         
         self.scheduler.start()
         logger.info("调度器已启动，注册了3个定时任务")
+        return {"status": "started", "message": "调度器已启动"}
     
     def stop(self):
         """停止调度器"""
+        if not self.scheduler.running:
+            logger.warning("调度器未运行")
+            return {"status": "not_running", "message": "调度器未运行"}
+        
         self.scheduler.shutdown()
         logger.info("调度器已停止")
+        return {"status": "stopped", "message": "调度器已停止"}
+    
+    def get_status(self) -> Dict:
+        """获取调度器状态"""
+        job_count = len(self.scheduler.get_jobs()) if self.scheduler.running else 0
+        return {
+            "running": self.scheduler.running,
+            "job_count": job_count,
+            "jobs": [
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run_time": str(job.next_run_time) if job.next_run_time else None
+                }
+                for job in self.scheduler.get_jobs()
+            ] if self.scheduler.running else []
+        }
     
     def generate_daily_suggestions(self):
         """

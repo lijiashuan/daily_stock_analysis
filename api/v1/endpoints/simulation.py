@@ -124,16 +124,46 @@ async def create_account(
         strategy_type=request.strategy_type
     )
     
-    summary = account.get_account_summary()
-    
-    return AccountResponse(**summary)
+    # account 现在是字典，直接构造响应
+    return AccountResponse(
+        account_id=str(account['id']),
+        account_name=account['name'],
+        initial_capital=request.initial_capital,
+        available_cash=request.initial_capital,
+        total_assets=request.initial_capital,
+        profit_loss=0.0,
+        profit_loss_pct=0.0,
+        positions={},
+        trade_count=0,
+        created_at=account.get('created_at', '')
+    )
 
 
 @router.get("/accounts", response_model=List[AccountResponse], tags=["Simulation Trading"])
 async def list_accounts(service: SimulationTradingService = Depends(get_simulation_service)):
     """获取所有模拟账户列表"""
     accounts = service.list_accounts()
-    return [AccountResponse(**acc.get_account_summary()) for acc in accounts]
+    
+    # 为每个账户计算实时统计信息
+    result = []
+    for acc in accounts:
+        # 获取账户统计信息
+        stats = service.get_account_statistics(acc['id'])
+        
+        result.append(AccountResponse(
+            account_id=str(acc['id']),
+            account_name=acc['name'],
+            initial_capital=stats['initial_capital'],
+            available_cash=stats['available_cash'],
+            total_assets=stats['total_assets'],
+            profit_loss=stats['profit_loss'],
+            profit_loss_pct=stats['profit_loss_pct'],
+            positions={str(k): int(v) for k, v in stats['positions'].items()},  # 转换为字符串键
+            trade_count=stats['trade_count'],
+            created_at=acc.get('created_at', '')
+        ))
+    
+    return result
 
 
 @router.get("/accounts/{account_id}", response_model=AccountResponse, tags=["Simulation Trading"])
@@ -142,11 +172,25 @@ async def get_account(
     service: SimulationTradingService = Depends(get_simulation_service)
 ):
     """获取指定账户详情"""
-    account = service.get_account(account_id)
+    account = service.get_account(int(account_id))
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
-    return AccountResponse(**account.get_account_summary())
+    # 获取账户统计信息
+    stats = service.get_account_statistics(int(account_id))
+    
+    return AccountResponse(
+        account_id=str(account['id']),
+        account_name=account['name'],
+        initial_capital=stats['initial_capital'],
+        available_cash=stats['available_cash'],
+        total_assets=stats['total_assets'],
+        profit_loss=stats['profit_loss'],
+        profit_loss_pct=stats['profit_loss_pct'],
+        positions={str(k): int(v) for k, v in stats['positions'].items()},  # 转换为字符串键
+        trade_count=stats['trade_count'],
+        created_at=account.get('created_at', '')
+    )
 
 
 @router.delete("/accounts/{account_id}", tags=["Simulation Trading"])
@@ -155,7 +199,7 @@ async def delete_account(
     service: SimulationTradingService = Depends(get_simulation_service)
 ):
     """删除模拟账户"""
-    success = service.delete_account(account_id)
+    success = service.delete_account(int(account_id))  # 转换为整数
     if not success:
         raise HTTPException(status_code=404, detail="Account not found")
     
@@ -177,7 +221,7 @@ async def execute_trade(
     - **quantity**: 交易数量
     """
     result = service.execute_trade(
-        account_id=account_id,
+        account_id=int(account_id),  # 转换为整数
         stock_code=request.stock_code,
         side=request.side,
         price=request.price,
@@ -271,8 +315,14 @@ async def start_scheduler(
 ):
     """启动调度器"""
     try:
-        scheduler.start()
-        return {"message": "调度器已启动"}
+        result = scheduler.start()
+        
+        if result['status'] == 'already_running':
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+        return {"message": result['message']}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -283,8 +333,26 @@ async def stop_scheduler(
 ):
     """停止调度器"""
     try:
-        scheduler.stop()
-        return {"message": "调度器已停止"}
+        result = scheduler.stop()
+        
+        if result['status'] == 'not_running':
+            raise HTTPException(status_code=400, detail=result['message'])
+        
+        return {"message": result['message']}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scheduler/status", tags=["Simulation Trading"])
+async def get_scheduler_status(
+    scheduler: SimulationScheduler = Depends(get_scheduler)
+):
+    """获取调度器状态"""
+    try:
+        status = scheduler.get_status()
+        return status
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

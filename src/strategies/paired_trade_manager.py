@@ -155,11 +155,16 @@ class FlexiblePairedTradeManager:
         group = TradeGroup(stock_code=self.stock_code)
         
         for buy_leg, sell_leg, matched_qty in matches:
-            # 如果是首次配对，添加到交易组
-            if buy_leg not in [leg for leg in group.buy_legs]:
-                group.buy_legs.append(buy_leg)
-            if sell_leg not in [leg for leg in group.sell_legs]:
-                group.sell_legs.append(sell_leg)
+            # 创建副本以保留原始数量信息（用于统计）
+            from copy import deepcopy
+            buy_leg_copy = deepcopy(buy_leg)
+            buy_leg_copy.quantity = matched_qty
+            sell_leg_copy = deepcopy(sell_leg)
+            sell_leg_copy.quantity = matched_qty
+            
+            # 添加到交易组（使用副本）
+            group.buy_legs.append(buy_leg_copy)
+            group.sell_legs.append(sell_leg_copy)
             
             # 计算盈亏
             profit = (sell_leg.price - buy_leg.price) * matched_qty
