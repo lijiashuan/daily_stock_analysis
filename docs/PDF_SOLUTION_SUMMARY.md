@@ -76,7 +76,7 @@ if (format === 'pdf' && errorMessage.includes('wkhtmltopdf')) {
 
 ### 4. 测试工具 ✅
 
-**文件**: `test_pdf_rtf_fix.py`
+**文件**: `scripts/archive/test_pdf_rtf_fix.py`（已归档）
 
 自动化测试脚本，可以验证：
 - PDF导出是否成功
@@ -169,8 +169,8 @@ scripts\install_wkhtmltopdf.bat
 
 ### 脚本和测试
 - `scripts/install_wkhtmltopdf.bat` - 自动安装脚本（新建）
-- `test_pdf_rtf_fix.py` - 测试脚本（新建）
-- `test_export_formats.py` - 综合测试（之前创建）
+- `scripts/archive/test_pdf_rtf_fix.py` - 测试脚本（已归档）
+- `scripts/archive/test_export_formats.py` - 综合测试（已归档）
 
 ## 下一步建议
 

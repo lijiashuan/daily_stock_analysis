@@ -74,6 +74,14 @@ _FIXED_TEMPERATURE_LITELLM_MODELS: Dict[str, Dict[str, float]] = {
         "thinking": 1.0,
         "non_thinking": 0.6,
     },
+    "gpt-5": {
+        "thinking": 1.0,
+        "non_thinking": 1.0,
+    },
+    "gpt-5.1": {
+        "thinking": 1.0,
+        "non_thinking": 1.0,
+    },
 }
 
 

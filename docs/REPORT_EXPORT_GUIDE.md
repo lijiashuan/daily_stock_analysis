@@ -120,19 +120,19 @@ pip install -r requirements.txt
 提供了测试脚本来验证所有导出格式：
 
 ```bash
-# 测试所有格式
-python test_export_formats.py <record_id> all
+# 测试所有格式（脚本已归档）
+python scripts/archive/test_export_formats.py <record_id> all
 
 # 仅测试PDF
-python test_export_formats.py <record_id> pdf
+python scripts/archive/test_export_formats.py <record_id> pdf
 
 # 仅测试Word
-python test_export_formats.py <record_id> docx
+python scripts/archive/test_export_formats.py <record_id> docx
 ```
 
 示例：
 ```bash
-python test_export_formats.py 123 all
+python scripts/archive/test_export_formats.py 123 all
 ```
 
 导出的文件会保存在 `reports/` 目录下。

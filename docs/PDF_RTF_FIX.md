@@ -133,11 +133,11 @@ if line.startswith('# '):
 运行测试脚本验证修复：
 
 ```bash
-# 测试 PDF 和 RTF 导出
-python test_pdf_rtf_fix.py <record_id>
+# 测试 PDF 和 RTF 导出（脚本已归档）
+python scripts/archive/test_pdf_rtf_fix.py <record_id>
 
 # 示例
-python test_pdf_rtf_fix.py 123
+python scripts/archive/test_pdf_rtf_fix.py 123
 ```
 
 测试脚本会：
@@ -230,7 +230,7 @@ A: 用文本编辑器打开RTF文件，检查：
 - `apps/dsa-web/src/api/history.ts` - 前端API客户端
 - `apps/dsa-web/src/components/report/ReportMarkdown.tsx` - 前端下载组件
 - `src/services/report_export_service.py` - 后端导出服务
-- `test_pdf_rtf_fix.py` - 测试脚本
+- `scripts/archive/test_pdf_rtf_fix.py` - 测试脚本（已归档）
 
 ## 更新日志
 

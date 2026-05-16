@@ -131,12 +131,12 @@ sudo apt-get install wkhtmltopdf
 安装完成后，运行测试脚本：
 
 ```bash
-python test_pdf_rtf_fix.py <record_id>
+python scripts/archive/test_pdf_rtf_fix.py <record_id>
 ```
 
 例如：
 ```bash
-python test_pdf_rtf_fix.py 123
+python scripts/archive/test_pdf_rtf_fix.py 123
 ```
 
 ## 常见问题
