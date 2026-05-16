@@ -3,11 +3,12 @@
 模拟交易服务
 
 整合数据提供者、策略算法和账户管理，提供统一的业务逻辑接口
+现在使用 Portfolio Service 作为数据源，实现数据持久化
 """
 
 import logging
 from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from src.data_provider.base import DataProvider
 from src.data_provider.mock_provider import MockDataProvider
@@ -16,6 +17,7 @@ from src.strategies.stock_screener import StockScreener
 from src.strategies.call_auction_analyzer import CallAuctionAnalyzer
 from src.strategies.intraday_swing_strategy import IntradaySwingStrategy
 from src.strategies.simple_backtester import SimpleBacktester
+from src.services.portfolio_service import PortfolioService
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +37,17 @@ class SimulationTradingService:
             data_provider: 数据提供者（默认使用Mock）
         """
         self.data_provider = data_provider or MockDataProvider()
-        self.accounts: Dict[str, SimulationAccount] = {}
+        self.portfolio_service = PortfolioService()  # 使用 Portfolio Service
+        
+        # 保留内存缓存用于快速访问（可选优化）
+        self.accounts_cache: Dict[int, SimulationAccount] = {}
         
         # 初始化策略组件
         self.screener = StockScreener(self.data_provider)
         self.auction_analyzer = CallAuctionAnalyzer()
         self.backtester = SimpleBacktester()
         
-        logger.info("SimulationTradingService 初始化完成")
+        logger.info("SimulationTradingService 初始化完成（使用 Portfolio 数据源）")
     
     # ==================== 账户管理 ====================
     
@@ -52,9 +57,9 @@ class SimulationTradingService:
         initial_capital: float,
         trading_mode: str = "balanced",
         strategy_type: str = "grid_trading"
-    ) -> SimulationAccount:
+    ) -> Dict:
         """
-        创建模拟账户
+        创建模拟账户（持久化到 Portfolio）
         
         Args:
             account_name: 账户名称
@@ -63,63 +68,72 @@ class SimulationTradingService:
             strategy_type: 策略类型
         
         Returns:
-            创建的账户实例
+            创建的账户字典
         """
-        # 转换枚举
-        mode_map = {
-            "conservative": TradingMode.CONSERVATIVE,
-            "balanced": TradingMode.BALANCED,
-            "aggressive": TradingMode.AGGRESSIVE
-        }
-        
-        strategy_map = {
-            "grid_trading": StrategyType.GRID_TRADING,
-            "intraday_swing": StrategyType.INTRADAY_SWING,
-            "paired_trade": StrategyType.PAIRED_TRADE
-        }
-        
-        account = SimulationAccount(
-            _account_name=account_name,
-            _initial_capital=initial_capital,
-            _cash=initial_capital,
-            trading_mode=mode_map.get(trading_mode, TradingMode.BALANCED),
-            strategy_type=strategy_map.get(strategy_type, StrategyType.GRID_TRADING)
+        # 调用 Portfolio Service 创建账户
+        account = self.portfolio_service.create_account(
+            name=account_name,
+            broker="模拟券商",
+            market="cn",
+            base_currency="CNY",
+            account_type="simulation"
         )
         
-        self.accounts[account.account_id] = account
+        # 记录初始资金流水
+        from datetime import date as date_type
+        self.portfolio_service.record_cash_ledger(
+            account_id=account['id'],
+            event_date=date_type.today(),
+            direction="in",
+            amount=initial_capital,
+            currency="CNY",
+            note="初始资金"
+        )
         
-        logger.info(f"创建账户: {account_name}, ID: {account.account_id}")
+        logger.info(f"创建模拟账户: {account_name}, ID: {account['id']}")
         
         return account
     
-    def get_account(self, account_id: str) -> Optional[SimulationAccount]:
-        """获取账户"""
-        return self.accounts.get(account_id)
+    def get_account(self, account_id: int) -> Optional[Dict]:
+        """获取账户（从 Portfolio）"""
+        try:
+            accounts = self.portfolio_service.list_accounts(account_type="simulation")
+            for acc in accounts:
+                if acc['id'] == account_id:
+                    return acc
+            return None
+        except Exception as e:
+            logger.error(f"获取账户失败: {e}")
+            return None
     
-    def list_accounts(self) -> List[SimulationAccount]:
-        """列出所有账户"""
-        return list(self.accounts.values())
+    def list_accounts(self) -> List[Dict]:
+        """列出所有模拟账户（从 Portfolio）"""
+        try:
+            return self.portfolio_service.list_accounts(account_type="simulation")
+        except Exception as e:
+            logger.error(f"列出账户失败: {e}")
+            return []
     
-    def delete_account(self, account_id: str) -> bool:
-        """删除账户"""
-        if account_id in self.accounts:
-            del self.accounts[account_id]
-            logger.info(f"删除账户: {account_id}")
-            return True
-        return False
+    def delete_account(self, account_id: int) -> bool:
+        """删除账户（软删除）"""
+        try:
+            return self.portfolio_service.deactivate_account(account_id)
+        except Exception as e:
+            logger.error(f"删除账户失败: {e}")
+            return False
     
     # ==================== 交易执行 ====================
     
     def execute_trade(
         self,
-        account_id: str,
+        account_id: int,
         stock_code: str,
         side: str,
         price: float,
         quantity: int
     ) -> Dict:
         """
-        执行交易
+        执行交易（持久化到 Portfolio）
         
         Args:
             account_id: 账户ID
@@ -133,31 +147,43 @@ class SimulationTradingService:
         """
         logger.info(f"执行交易: account_id={account_id}, stock_code={stock_code}, side={side}, price={price}, quantity={quantity}")
         
+        # 验证账户存在且为模拟账户
         account = self.get_account(account_id)
         if not account:
             logger.warning(f"账户不存在: {account_id}")
             return {"success": False, "message": "账户不存在"}
         
-        logger.info(f"账户当前资金: {account.available_cash}, 持仓: {account.positions}")
-        
-        from src.schemas.simulation_models import OrderRequest, OrderSide
-        
-        order = OrderRequest(
-            stock_code=stock_code,
-            side=OrderSide.BUY if side == "BUY" else OrderSide.SELL,
-            price=price,
-            quantity=quantity
-        )
-        
-        result = account.place_order(order)
-        
-        logger.info(f"交易结果: success={result.success}, message={result.message}")
-        
-        return {
-            "success": result.success,
-            "order_id": result.order_id,
-            "message": result.message
-        }
+        try:
+            # 调用 Portfolio Service 记录交易
+            trade = self.portfolio_service.record_trade(
+                account_id=account_id,
+                symbol=stock_code,
+                trade_date=date.today(),
+                side=side.lower(),  # buy/sell
+                quantity=float(quantity),
+                price=price,
+                fee=0.0,  # 模拟交易免手续费
+                tax=0.0,
+                market="cn",
+                currency="CNY",
+                note="模拟交易"
+            )
+            
+            logger.info(f"交易成功: trade_id={trade['id']}")
+            
+            return {
+                "success": True,
+                "order_id": str(trade['id']),
+                "message": "交易成功"
+            }
+            
+        except Exception as e:
+            logger.error(f"交易失败: {e}")
+            return {
+                "success": False,
+                "order_id": "",
+                "message": f"交易失败: {str(e)}"
+            }
     
     # ==================== 交易建议 ====================
     
