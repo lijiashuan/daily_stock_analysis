@@ -11,7 +11,7 @@
 
 import logging
 from datetime import datetime, time
-from typing import List, Optional
+from typing import Dict, List, Optional
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 

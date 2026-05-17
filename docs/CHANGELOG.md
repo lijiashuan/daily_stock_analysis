@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
+- [改进] 模拟交易系统完善：修复虚拟环境路径、安装依赖、修复前端 TypeScript 错误，验证 Portfolio/Simulation API 完整性。
+- [修复] 修复 PowerShell 终端中文乱码问题，设置 UTF-8 编码。
+- [修复] 修复 SimulationTradingPage.tsx 中的 TypeScript 编译错误（未使用变量、类型不匹配）。
+- [文档] 更新 SIMULATION_TRADING_PLAN.md，添加今日优化计划和完成总结。
 - [新功能] 通知网关新增 ntfy 一等渠道，支持通过 `NTFY_URL` / `NTFY_TOKEN` 推送并接入 Web 测试、路由、Actions 与诊断。
 - [新功能] 通知网关新增 Gotify 一等渠道，支持通过 `GOTIFY_URL` / `GOTIFY_TOKEN` 推送 Markdown 文本并接入 Web 测试、路由、Actions 与诊断。
 - [修复] 收紧 ntfy 结构化校验，避免 URL 编码空白 topic 被误判为有效通知端点。
