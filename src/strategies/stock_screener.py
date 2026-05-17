@@ -60,10 +60,12 @@ class StockScreener:
                 end_date = datetime.now().strftime('%Y%m%d')
                 start_date = (datetime.now() - timedelta(days=lookback_days)).strftime('%Y%m%d')
                 
-                df = self.data_provider.get_stock_history(stock_code, start_date, end_date)
+                df, _ = self.data_provider.get_daily_data(stock_code, start_date=start_date, end_date=end_date)
                 
-                if df is None or len(df) < lookback_days * 0.7:  # 至少70%的数据
-                    logger.debug(f"{stock_code}: 数据不足，跳过")
+                # 放宽数据量要求：至少需要20天的数据（约一个月交易日）
+                min_required_days = min(20, lookback_days * 0.5)  # 至少20天，或lookback的50%
+                if df is None or len(df) < min_required_days:
+                    logger.debug(f"{stock_code}: 数据不足 ({len(df) if df is not None else 0}天 < {min_required_days}天)，跳过")
                     continue
                 
                 # 计算各项指标
@@ -71,6 +73,7 @@ class StockScreener:
                 
                 # 检查是否符合条件
                 if not self._meets_criteria(metrics, min_avg_volume, min_volatility, max_volatility):
+                    logger.debug(f"{stock_code}: 不符合筛选条件")
                     continue
                 
                 # 计算综合评分
@@ -107,6 +110,16 @@ class StockScreener:
         """
         close = df['close']
         volume = df['volume']
+        
+        # Tushare 返回的 volume 单位是手（1手=100股），转换为股
+        # 如果不是 Tushare 数据源，volume 可能已经是股
+        # 这里通过数据量级判断：如果 avg_volume < 100000，大概率是手
+        avg_volume_raw = volume.mean()
+        volume_is_shou = avg_volume_raw < 100000  # 如果均值小于10万，假设是手
+        
+        if volume_is_shou:
+            volume = volume * 100  # 转换为股
+            logger.debug(f"检测到成交量单位为手，已转换为股")
         
         # 1. 流动性指标
         avg_volume = volume.mean()

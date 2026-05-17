@@ -6,10 +6,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Form, Input, InputNumber, message, Space, Row, Col, Statistic, Divider, Select, Alert, Empty, Descriptions, Modal, Tabs, Table, Tag } from 'antd';
+import { Card, Button, Form, Input, InputNumber, message, Space, Row, Col, Statistic, Divider, Select, Alert, Empty, Descriptions, Modal, Tabs, Table, Tag, Typography } from 'antd';
 import { ReloadOutlined, ArrowUpOutlined, ArrowDownOutlined, LineChartOutlined, PlayCircleOutlined, StopOutlined, RiseOutlined, FallOutlined, SearchOutlined, InfoCircleOutlined, LinkOutlined, WarningOutlined } from '@ant-design/icons';
 import { portfolioApi } from '../api/portfolio';
 import type { PortfolioAccountItem, PortfolioSnapshotResponse } from '../types/portfolio';
+const { Text } = Typography;
 const { TabPane } = Tabs;
 
 const SimulationTradingPage: React.FC = () => {
@@ -38,6 +39,11 @@ const SimulationTradingPage: React.FC = () => {
   // 手动输入分析相关状态
   const [manualStockAnalysis, setManualStockAnalysis] = useState<any>(null);
   const [analyzeLoading, setAnalyzeLoading] = useState(false);
+  
+  // 新增状态：股票名称、手动输入代码、验证状态
+  const [selectedStockName, setSelectedStockName] = useState<string>('');
+  const [manualInputCode, setManualInputCode] = useState<string>('');
+  const [validationStatus, setValidationStatus] = useState<'success' | 'error' | undefined>(undefined);
 
   // 加载模拟账户列表
   const loadAccounts = async () => {
@@ -106,19 +112,21 @@ const SimulationTradingPage: React.FC = () => {
     }
   };
 
-  // 设置当前操作标的
-  const handleSetSelectedStock = (stockCode: string) => {
+  // 设置当前操作标的（统一入口）
+  const handleSetSelectedStock = (stockCode: string, stockName?: string) => {
     setSelectedStockCode(stockCode);
-    message.success(`已选定 ${stockCode} 为当前操作标的`);
-  };
-
-  // 搜索股票（手动输入）
-  const handleStockSearch = (value: string) => {
-    if (value) {
-      setSelectedStockCode(value);
-      message.success(`已选定 ${value} 为当前操作标的`);
+    if (stockName) {
+      setSelectedStockName(stockName);
     }
   };
+
+  // 搜索股票（手动输入）- 已废弃，改用顶部统一选择器
+  // const handleStockSearch = (value: string) => {
+  //   if (value) {
+  //     setSelectedStockCode(value);
+  //     message.success(`已选定 ${value} 为当前操作标的`);
+  //   }
+  // };
 
   // ========== 辅助函数 ==========
   
@@ -129,120 +137,96 @@ const SimulationTradingPage: React.FC = () => {
     return '➡️ 中性';
   };
   
-  // 生成 Mock 推荐数据（临时使用，后续替换为真实 API）
-  const generateMockRecommendations = () => {
-    return [
-      {
-        stock_code: '600519',
-        stock_name: '贵州茅台',
-        score: 85.5,
-        rank: 1,
-        current_price: 1850.00,
-        change_pct: 2.3,
-        trend_strength: 82,
-        rsi: 55.3,
-        volume_ratio: 1.3,
-        macd_signal: 'bullish',
-        support_level: 1820.0,
-        resistance_level: 1900.0,
-        reasons: ['多头排列，MA5>MA10>MA20', '量能放大，资金流入明显', 'MACD 金叉信号'],
-        risks: ['RSI 接近超买区', '上方阻力位较近']
-      },
-      {
-        stock_code: '300750',
-        stock_name: '宁德时代',
-        score: 82.3,
-        rank: 2,
-        current_price: 245.80,
-        change_pct: 1.8,
-        trend_strength: 78,
-        rsi: 52.1,
-        volume_ratio: 1.2,
-        macd_signal: 'bullish',
-        support_level: 240.0,
-        resistance_level: 255.0,
-        reasons: ['突破前期平台', '成交量温和放大', '板块热度高'],
-        risks: ['短期涨幅较大', '注意回调风险']
-      },
-      {
-        stock_code: '002594',
-        stock_name: '比亚迪',
-        score: 79.8,
-        rank: 3,
-        current_price: 285.50,
-        change_pct: -0.5,
-        trend_strength: 75,
-        rsi: 48.5,
-        volume_ratio: 0.9,
-        macd_signal: 'neutral',
-        support_level: 280.0,
-        resistance_level: 295.0,
-        reasons: ['均线粘合，方向待选', '估值合理', '长期趋势向上'],
-        risks: ['短期震荡', '量能不足']
-      },
-      {
-        stock_code: '000063',
-        stock_name: '中兴通讯',
-        score: 76.2,
-        rank: 4,
-        current_price: 42.30,
-        change_pct: 3.2,
-        trend_strength: 72,
-        rsi: 58.7,
-        volume_ratio: 1.5,
-        macd_signal: 'bullish',
-        support_level: 40.5,
-        resistance_level: 45.0,
-        reasons: ['放量上涨', '突破关键压力位', '5G 概念活跃'],
-        risks: ['乖离率偏大', '追高风险']
-      },
-      {
-        stock_code: '600690',
-        stock_name: '海尔智家',
-        score: 73.5,
-        rank: 5,
-        current_price: 28.90,
-        change_pct: 0.8,
-        trend_strength: 68,
-        rsi: 50.2,
-        volume_ratio: 1.0,
-        macd_signal: 'neutral',
-        support_level: 28.0,
-        resistance_level: 30.5,
-        reasons: ['稳健上涨', '基本面良好', '分红稳定'],
-        risks: ['弹性较小', '涨速较慢']
-      }
-    ];
+  // 股票代码格式验证
+  const validateStockCode = (code: string): boolean => {
+    if (!code) return false;
+    // A股：6位数字
+    if (/^\d{6}$/.test(code)) return true;
+    // 港股：hk + 5位数字
+    if (/^hk\d{5}$/i.test(code)) return true;
+    // 美股：字母组合（1-5位）
+    if (/^[A-Z]{1,5}$/i.test(code)) return true;
+    return false;
   };
   
-  // 智能选股处理函数
+  // 手动输入股票代码处理
+  const handleManualInputChange = (value: string) => {
+    setManualInputCode(value);
+    const isValid = validateStockCode(value);
+    setValidationStatus(value ? (isValid ? 'success' : 'error') : undefined);
+    
+    // 如果格式正确，自动更新 selectedStockCode（但不更新 selectedStockName）
+    if (isValid) {
+      setSelectedStockCode(value);
+      // 不在这里设置 selectedStockName，等待用户点击"确定"按钮
+    }
+  };
+  
+  // 确定按钮点击处理
+  const handleConfirmSelection = () => {
+    if (!selectedStockCode) {
+      message.warning('请先选择或输入股票代码');
+      return;
+    }
+    // 查找并设置股票名称（只有点击确定后才更新 selectedStockName）
+    const stock = recommendedStocks.find(s => s.stock_code === selectedStockCode);
+    if (stock) {
+      setSelectedStockName(stock.stock_name);
+    } else if (manualInputCode && validateStockCode(manualInputCode)) {
+      // 手动输入的，使用代码作为名称
+      setSelectedStockName(manualInputCode);
+    }
+    message.success(`已选定 ${selectedStockCode} 为当前操作标的`);
+  };
+  
+  // 智能选股处理函数（全市场 A 股筛选）
   const handleGetRecommendations = async () => {
     setRecommendLoading(true);
     try {
-      // TODO: 后续替换为真实 API 调用
-      // const response = await fetch('/api/v1/simulation/recommendations', {...});
+      // 调用全市场筛选 API（关闭 LLM 深度分析，仅技术面筛选）
+      const response = await fetch('/api/v1/recommendations/market-screen?top_n=5&use_llm=false');
       
-      // 暂时使用 Mock 数据
-      await new Promise(resolve => setTimeout(resolve, 1500)); // 模拟网络延迟
-      const mockData = generateMockRecommendations();
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail?.message || '获取推荐失败');
+      }
       
-      setRecommendedStocks(mockData);
-      setActiveRecommendTab(mockData[0].stock_code); // 默认选中第一个
-      message.success('AI 智能选股完成，已生成 Top 5 推荐');
-    } catch (error) {
-      message.error('智能选股失败，请稍后重试');
+      const data = await response.json();
+      
+      // 转换数据格式以匹配前端期望
+      const formattedData = data.recommendations.map((item: any) => ({
+        stock_code: item.stock_code,
+        stock_name: item.stock_name || item.stock_code,
+        score: item.score,
+        rank: item.rank,
+        current_price: item.current_price || 0,
+        change_pct: item.change_pct || 0,
+        trend_strength: item.trend_strength || 0,
+        rsi: item.rsi || 50,
+        volume_ratio: item.volume_ratio || 1,
+        macd_signal: item.macd_signal || 'neutral',
+        support_level: item.support_level || 0,
+        resistance_level: item.resistance_level || 0,
+        reasons: item.reasons || [],
+        risks: item.risks || [],
+        trend_prediction: item.trend_prediction,
+        operation_advice: item.operation_advice
+      }));
+      
+      setRecommendedStocks(formattedData);
+      if (formattedData.length > 0) {
+        setActiveRecommendTab(formattedData[0].stock_code); // 默认选中第一个
+      }
+      message.success(`全市场 AI 选股完成，从 ${data.total_screened} 只 A 股中筛选出 Top ${formattedData.length}`);
+    } catch (error: any) {
+      console.error('[handleGetRecommendations] Error:', error);
+      message.error(error.message || '智能选股失败，请稍后重试');
     } finally {
       setRecommendLoading(false);
     }
   };
   
-  // 选定推荐股票
-  const handleSelectRecommendedStock = (stockCode: string) => {
-    setSelectedStockCode(stockCode);
-    message.success(`已选定 ${stockCode} 为当前操作标的`);
-  };
-  
-  // 手动输入股票的 AI 分析
+  // 手动输入股票的 AI 深度分析
   const handleAnalyzeManualStock = async () => {
     if (!selectedStockCode) {
       message.warning('请先输入股票代码');
@@ -251,36 +235,38 @@ const SimulationTradingPage: React.FC = () => {
     
     setAnalyzeLoading(true);
     try {
-      // 复用现有的 suggestions API
-      const response = await fetch('/api/v1/simulation/suggestions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stock_code: selectedStockCode,
-          use_auction: false  // 手动分析不使用集合竞价
-        })
-      });
+      // 使用新的 single-stock 分析 API（带 LLM 深度分析）
+      const response = await fetch(
+        `/api/v1/recommendations/analyze-stock?stock_code=${encodeURIComponent(selectedStockCode)}`
+      );
       
       if (!response.ok) {
-        throw new Error('分析失败');
+        const errorData = await response.json();
+        throw new Error(errorData.detail?.message || 'AI 深度分析失败');
       }
       
       const data = await response.json();
-      setManualStockAnalysis(data);
-      message.success('AI 分析完成');
-    } catch (error) {
-      message.error('分析失败，请检查股票代码是否正确');
+      
+      if (data.stock) {
+        setManualStockAnalysis(data.stock);
+        message.success('AI 深度分析完成！');
+      } else {
+        message.warning('未获取到分析结果');
+      }
+    } catch (error: any) {
+      console.error('[handleAnalyzeManualStock] Error:', error);
+      message.error(error.message || '分析失败，请检查股票代码是否正确');
     } finally {
       setAnalyzeLoading(false);
     }
   };
   
-  // 选定手动分析的股票
-  const handleSelectManualStock = () => {
-    if (selectedStockCode) {
-      message.success(`已选定 ${selectedStockCode} 为当前操作标的`);
-    }
-  };
+  // 选定手动分析的股票（已废弃，改用顶部统一选择器）
+  // const handleSelectManualStock = () => {
+  //   if (selectedStockCode) {
+  //     message.success(`已选定 ${selectedStockCode} 为当前操作标的`);
+  //   }
+  // };
 
   // 检查调度器状态
   const checkSchedulerStatus = async () => {
@@ -962,34 +948,77 @@ const SimulationTradingPage: React.FC = () => {
 
         {/* 中间：选股区 (35%) */}
         <Col xs={24} lg={8}>
-          <Card title=" 选股区" style={{ height: '100%' }}>
+          <Card title="🎯 选股区" style={{ height: '100%' }}>
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <Tabs defaultActiveKey="manual">
+              {/* 当前操作标的选择器 - 移到 TAB 上方 */}
+              <div>
+                <div style={{ fontWeight: 'bold', marginBottom: 8 }}>✅ 当前操作标的:</div>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Select
+                    style={{ flex: 1 }}
+                    placeholder="选择推荐股票或手动输入代码"
+                    showSearch
+                    value={selectedStockCode || undefined}
+                    onChange={(value) => {
+                      setSelectedStockCode(value);
+                      const stock = recommendedStocks.find(s => s.stock_code === value);
+                      if (stock) {
+                        setSelectedStockName(stock.stock_name);
+                      } else {
+                        setSelectedStockName('');
+                      }
+                    }}
+                    onSearch={handleManualInputChange}
+                    options={[
+                      ...recommendedStocks.map((stock, index) => ({
+                        label: `${index + 1}. ${stock.stock_name.length > 6 ? stock.stock_name.substring(0, 6) + '...' : stock.stock_name}`,
+                        value: stock.stock_code
+                      })),
+                      ...(manualInputCode && validateStockCode(manualInputCode) ? [{
+                        label: `手动输入: ${manualInputCode}`,
+                        value: manualInputCode
+                      }] : [])
+                    ]}
+                    filterOption={(input, option) => {
+                      if (!option?.label) return false;
+                      return option.label.toLowerCase().includes(input.toLowerCase());
+                    }}
+                    allowClear
+                  />
+                  <Button type="primary" onClick={handleConfirmSelection} style={{ width: '80px' }}>
+                    确定
+                  </Button>
+                </Space.Compact>
+                
+                {/* 验证提示 */}
+                {manualInputCode && validationStatus && (
+                  <div style={{ marginTop: '4px' }}>
+                    <Text type={validationStatus === 'success' ? 'success' : 'danger'} style={{ fontSize: '12px' }}>
+                      {validationStatus === 'success' ? '✓ 格式正确' : '✗ 格式错误（A股:6位数字 / 港股:hk+5位 / 美股:1-5字母）'}
+                    </Text>
+                  </div>
+                )}
+              </div>
+
+              <Tabs 
+                defaultActiveKey="manual"
+                tabBarStyle={{ fontSize: '12px' }}
+              >
                 <TabPane tab="手动输入" key="manual">
                   <Space direction="vertical" style={{ width: '100%' }} size="middle">
                     <div>
                       <div style={{ marginBottom: 8, fontWeight: 'bold' }}>输入股票代码：</div>
-                      <Input.Search
+                      <Input
                         placeholder="例如：600519"
-                        enterButton="确定"
-                        onSearch={handleStockSearch}
+                        value={manualInputCode}
+                        onChange={(e) => handleManualInputChange(e.target.value)}
                         prefix={<SearchOutlined />}
+                        status={validationStatus}
                       />
                     </div>
                     
                     {selectedStockCode && (
                       <Space direction="vertical" style={{ width: '100%' }} size="small">
-                        <Alert
-                          message={`✅ 已选定: ${selectedStockCode}`}
-                          type="success"
-                          showIcon
-                          action={
-                            <Button size="small" onClick={() => setSelectedStockCode('')}>
-                              清除
-                            </Button>
-                          }
-                        />
-                        
                         {/* AI 深度分析按钮 */}
                         <Button
                           type="primary"
@@ -1003,8 +1032,24 @@ const SimulationTradingPage: React.FC = () => {
                         
                         {/* 显示分析结果 */}
                         {manualStockAnalysis && (
-                          <Card size="small" title="📊 技术指标分析">
+                          <Card size="small" title="📊 AI 深度分析报告">
                             <Space direction="vertical" style={{ width: '100%' }} size="small">
+                              {/* 综合评分 */}
+                              {manualStockAnalysis.score && (
+                                <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                                  <div style={{ fontSize: '12px', color: '#999' }}>综合评分</div>
+                                  <div style={{ 
+                                    fontSize: '32px', 
+                                    fontWeight: 'bold', 
+                                    color: manualStockAnalysis.score >= 80 ? '#52c41a' : manualStockAnalysis.score >= 60 ? '#faad14' : '#ff4d4f'
+                                  }}>
+                                    {manualStockAnalysis.score}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              <Divider style={{ margin: '8px 0' }} />
+                              
                               {/* 价格和情绪 */}
                               <Row gutter={[8, 8]}>
                                 <Col span={12}>
@@ -1021,59 +1066,86 @@ const SimulationTradingPage: React.FC = () => {
                                 </Col>
                               </Row>
                               
-                              {/* 网格订单摘要 */}
-                              {manualStockAnalysis.grid_orders && manualStockAnalysis.grid_orders.length > 0 && (
+                              {/* 关键技术指标 */}
+                              {manualStockAnalysis.rsi && (
+                                <Row gutter={[8, 8]} style={{ marginTop: '8px' }}>
+                                  <Col span={8}>
+                                    <div style={{ fontSize: '11px', color: '#999' }}>RSI</div>
+                                    <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{manualStockAnalysis.rsi?.toFixed(1)}</div>
+                                  </Col>
+                                  <Col span={8}>
+                                    <div style={{ fontSize: '11px', color: '#999' }}>量比</div>
+                                    <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{manualStockAnalysis.volume_ratio?.toFixed(2)}</div>
+                                  </Col>
+                                  <Col span={8}>
+                                    <div style={{ fontSize: '11px', color: '#999' }}>趋势强度</div>
+                                    <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{manualStockAnalysis.trend_strength?.toFixed(0)}%</div>
+                                  </Col>
+                                </Row>
+                              )}
+                              
+                              {/* 支撑/阻力位 */}
+                              {manualStockAnalysis.support_level && manualStockAnalysis.resistance_level && (
+                                <Row gutter={[8, 8]} style={{ marginTop: '8px' }}>
+                                  <Col span={12}>
+                                    <div style={{ fontSize: '11px', color: '#999' }}>支撑位</div>
+                                    <div style={{ fontSize: '13px', color: '#52c41a', fontWeight: 'bold' }}>¥{manualStockAnalysis.support_level?.toFixed(2)}</div>
+                                  </Col>
+                                  <Col span={12}>
+                                    <div style={{ fontSize: '11px', color: '#999' }}>阻力位</div>
+                                    <div style={{ fontSize: '13px', color: '#ff4d4f', fontWeight: 'bold' }}>¥{manualStockAnalysis.resistance_level?.toFixed(2)}</div>
+                                  </Col>
+                                </Row>
+                              )}
+                              
+                              {/* 操作建议 */}
+                              {manualStockAnalysis.operation_advice && (
                                 <>
                                   <Divider style={{ margin: '8px 0' }} />
-                                  <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>
-                                    生成 {manualStockAnalysis.grid_orders.length} 个网格订单
-                                  </div>
-                                  <Table
-                                    dataSource={manualStockAnalysis.grid_orders.slice(0, 3)} // 只显示前3个
-                                    rowKey={(_, index) => index || 0}
-                                    pagination={false}
-                                    size="small"
-                                    columns={[
-                                      {
-                                        title: '类型',
-                                        dataIndex: 'order_type',
-                                        width: 60,
-                                        render: (type) => (
-                                          <Tag color={
-                                            type === 'ENTRY' ? 'blue' :
-                                            type === 'TAKE_PROFIT' ? 'green' : 'red'
-                                          }>
-                                            {type === 'ENTRY' ? '建仓' : type === 'TAKE_PROFIT' ? '止盈' : '止损'}
-                                          </Tag>
-                                        )
-                                      },
-                                      {
-                                        title: '价格',
-                                        dataIndex: 'price',
-                                        render: (val) => `¥${val.toFixed(2)}`
-                                      },
-                                      {
-                                        title: '方向',
-                                        dataIndex: 'side',
-                                        render: (side) => (
-                                          <span style={{ color: side === 'BUY' ? '#52c41a' : '#ff4d4f' }}>
-                                            {side === 'BUY' ? '买' : '卖'}
-                                          </span>
-                                        )
-                                      }
-                                    ]}
+                                  <Alert
+                                    message="💡 操作建议"
+                                    description={manualStockAnalysis.operation_advice}
+                                    type={manualStockAnalysis.operation_advice.includes('买入') || manualStockAnalysis.operation_advice.includes('加仓') ? 'success' : 'warning'}
+                                    showIcon
                                   />
                                 </>
                               )}
                               
-                              {/* 选定按钮 */}
-                              <Button
-                                type="primary"
-                                block
-                                onClick={handleSelectManualStock}
-                              >
-                                ✅ 选定此股票为操作标的
-                              </Button>
+                              {/* 趋势预测 */}
+                              {manualStockAnalysis.trend_prediction && (
+                                <Alert
+                                  message="📈 趋势预测"
+                                  description={manualStockAnalysis.trend_prediction}
+                                  type="info"
+                                  showIcon
+                                />
+                              )}
+                              
+                              {/* 推荐理由 */}
+                              {manualStockAnalysis.reasons && manualStockAnalysis.reasons.length > 0 && (
+                                <>
+                                  <Divider style={{ margin: '8px 0' }} />
+                                  <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '4px' }}>✅ 推荐理由</div>
+                                  <ul style={{ margin: '4px 0', paddingLeft: '20px', fontSize: '12px' }}>
+                                    {manualStockAnalysis.reasons.map((reason: string, idx: number) => (
+                                      <li key={idx} style={{ marginBottom: '4px' }}>{reason}</li>
+                                    ))}
+                                  </ul>
+                                </>
+                              )}
+                              
+                              {/* 风险提示 */}
+                              {manualStockAnalysis.risks && manualStockAnalysis.risks.length > 0 && (
+                                <>
+                                  <Divider style={{ margin: '8px 0' }} />
+                                  <div style={{ fontSize: '13px', fontWeight: 'bold', marginBottom: '4px' }}>⚠️ 风险提示</div>
+                                  <ul style={{ margin: '4px 0', paddingLeft: '20px', fontSize: '12px' }}>
+                                    {manualStockAnalysis.risks.map((risk: string, idx: number) => (
+                                      <li key={idx} style={{ marginBottom: '4px' }}>{risk}</li>
+                                    ))}
+                                  </ul>
+                                </>
+                              )}
                             </Space>
                           </Card>
                         )}
@@ -1101,7 +1173,7 @@ const SimulationTradingPage: React.FC = () => {
                         block
                         size="large"
                       >
-                        🤖 AI 智能选股（Top 5）
+                        🤖 全市场 AI 选股（沪深300+热门股）
                       </Button>
                     )}
                     
@@ -1118,13 +1190,20 @@ const SimulationTradingPage: React.FC = () => {
                           刷新推荐
                         </Button>
                         
-                        {/* TAB 展示推荐股票 */}
+                        {/* TAB 展示推荐股票 - 名称最多4个汉字，无序号 */}
                         <Tabs
                           activeKey={activeRecommendTab}
                           onChange={setActiveRecommendTab}
-                          items={recommendedStocks.map((stock, index) => ({
+                          type="card"
+                          size="small"
+                          tabBarStyle={{ fontSize: '14px' }}
+                          items={recommendedStocks.map((stock) => ({
                             key: stock.stock_code,
-                            label: `${index + 1}. ${stock.stock_name}`,
+                            label: (
+                              <span style={{ whiteSpace: 'nowrap', fontSize: '14px', fontWeight: 500 }}>
+                                {(stock.stock_name || stock.stock_code).substring(0, 4)}
+                              </span>
+                            ),
                             children: (
                               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                                 {/* 综合评分卡片 */}
@@ -1133,7 +1212,7 @@ const SimulationTradingPage: React.FC = () => {
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                       <div>
                                         <div style={{ fontSize: '18px', fontWeight: 'bold' }}>
-                                          {stock.stock_name} ({stock.stock_code})
+                                          {stock.stock_name || stock.stock_code} ({stock.stock_code})
                                         </div>
                                         <div style={{ fontSize: '12px', color: '#999' }}>
                                           排名: 第 {stock.rank} 名
@@ -1253,15 +1332,7 @@ const SimulationTradingPage: React.FC = () => {
                                       type="warning"
                                       showIcon
                                     />
-                                    
-                                    {/* 选定按钮 */}
-                                    <Button
-                                      type="primary"
-                                      block
-                                      onClick={() => handleSelectRecommendedStock(stock.stock_code)}
-                                    >
-                                      ✅ 选定此股票为操作标的
-                                    </Button>
+                                    {/* 删除了选定按钮 */}
                                   </Space>
                                 </Card>
                               </Space>
@@ -1273,24 +1344,6 @@ const SimulationTradingPage: React.FC = () => {
                   </Space>
                 </TabPane>
               </Tabs>
-
-              <Divider style={{ margin: '12px 0' }} />
-
-              {/* 已选标的 */}
-              <div style={{ fontWeight: 'bold', marginBottom: 8 }}>✅ 当前操作标的</div>
-              {selectedStockCode ? (
-                <Alert
-                  message={`${selectedStockCode} - 点击交易执行区的"生成交易建议"按钮获取策略`}
-                  type="success"
-                  showIcon
-                />
-              ) : (
-                <Alert
-                  message="请先在上方选择股票"
-                  type="warning"
-                  showIcon
-                />
-              )}
             </Space>
           </Card>
         </Col>
@@ -1303,7 +1356,7 @@ const SimulationTradingPage: React.FC = () => {
                 <Space direction="vertical" style={{ width: '100%' }} size="middle">
                   {/* 当前标的信息 */}
                   <Alert
-                    message={`📌 当前标的: ${selectedStockCode || '未选择'}`}
+                    message={`📌 当前标的: ${selectedStockCode || '未选择'} ${selectedStockName ? `(标的：${selectedStockName})` : ''}`}
                     description={selectedStockCode ? "点击下方按钮生成交易建议" : "请先在选股区选择股票"}
                     type={selectedStockCode ? "info" : "warning"}
                     showIcon
@@ -1495,45 +1548,6 @@ const SimulationTradingPage: React.FC = () => {
                 </Space>
               </TabPane>
             </Tabs>
-            
-            <Divider style={{ margin: '12px 0' }} />
-            
-            {/* 当前操作标的选择器 */}
-            <div style={{ fontWeight: 'bold', marginBottom: 8 }}>✅ 当前操作标的</div>
-            <Space direction="vertical" style={{ width: '100%' }} size="small">
-              <Select
-                style={{ width: '100%' }}
-                placeholder="选择推荐股票或手动输入代码"
-                showSearch
-                value={selectedStockCode || undefined}
-                onChange={(value) => setSelectedStockCode(value)}
-                options={[
-                  ...recommendedStocks.map((stock, index) => ({
-                    label: `${index + 1}. ${stock.stock_name} (${stock.stock_code}) - 评分:${stock.score}`,
-                    value: stock.stock_code
-                  })),
-                  { label: '─── 手动输入 ───', value: '__manual__', disabled: true }
-                ]}
-                filterOption={(input, option) => {
-                  if (!option?.label) return false;
-                  return option.label.toLowerCase().includes(input.toLowerCase());
-                }}
-                allowClear
-              />
-              
-              {selectedStockCode && (
-                <Alert
-                  message={`${selectedStockCode} - 点击右侧“生成交易建议”按钮获取策略`}
-                  type="success"
-                  showIcon
-                  action={
-                    <Button size="small" onClick={() => setSelectedStockCode('')}>
-                      清除
-                    </Button>
-                  }
-                />
-              )}
-            </Space>
           </Card>
         </Col>
       </Row>
