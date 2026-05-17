@@ -42,6 +42,7 @@ from sqlalchemy import (
     desc,
     event,
     func,
+    text,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import (
@@ -697,6 +698,9 @@ class DatabaseManager:
         self._initialized = True
         logger.info(f"数据库初始化完成: {db_url}")
 
+        # 自动执行数据库迁移
+        self._auto_migrate()
+
         # 注册退出钩子，确保程序退出时关闭数据库连接
         atexit.register(DatabaseManager._cleanup_engine, self._engine)
     
@@ -732,6 +736,48 @@ class DatabaseManager:
                 logger.debug("数据库引擎已清理")
         except Exception as e:
             logger.warning(f"清理数据库引擎时出错: {e}")
+
+    def _auto_migrate(self):
+        """自动执行数据库迁移（幂等操作）"""
+        if not self._is_sqlite_engine:
+            return
+        
+        try:
+            with self.get_session() as session:
+                # 检查 portfolio_accounts 表是否有 account_type 字段
+                result = session.execute(
+                    text("PRAGMA table_info(portfolio_accounts)")
+                )
+                columns = [row[1] for row in result.fetchall()]
+                
+                if 'account_type' not in columns:
+                    logger.info("检测到数据库需要迁移：添加 account_type 字段")
+                    
+                    # 添加字段
+                    session.execute(
+                        text("""
+                            ALTER TABLE portfolio_accounts 
+                            ADD COLUMN account_type TEXT DEFAULT 'real'
+                        """)
+                    )
+                    
+                    # 更新现有记录
+                    session.execute(
+                        text("""
+                            UPDATE portfolio_accounts 
+                            SET account_type = 'real' 
+                            WHERE account_type IS NULL
+                        """)
+                    )
+                    
+                    session.commit()
+                    logger.info("✅ 数据库迁移完成：account_type 字段已添加")
+                else:
+                    logger.debug("数据库已是最新版本，无需迁移")
+                    
+        except Exception as e:
+            logger.error(f"数据库迁移失败: {e}")
+            # 不抛出异常，允许应用继续启动（可能字段已存在或其他原因）
 
     def _install_sqlite_pragma_handler(self) -> None:
         """为 SQLite 连接安装竞争保护参数。"""
