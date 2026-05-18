@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Response
@@ -181,10 +181,20 @@ def delete_account(account_id: int):
 def create_trade(request: PortfolioTradeCreateRequest) -> PortfolioEventCreatedResponse:
     service = PortfolioService()
     try:
+        # Parse trade_date from ISO format string to date object
+        # Supports both YYYY-MM-DD and YYYY-MM-DDTHH:MM:SS formats
+        trade_date_str = request.trade_date.strip()
+        if 'T' in trade_date_str:
+            # Has time component, parse as datetime then extract date
+            trade_date_obj = datetime.fromisoformat(trade_date_str).date()
+        else:
+            # Date only
+            trade_date_obj = date.fromisoformat(trade_date_str)
+        
         data = service.record_trade(
             account_id=request.account_id,
             symbol=request.symbol,
-            trade_date=request.trade_date,
+            trade_date=trade_date_obj,
             side=request.side,
             quantity=request.quantity,
             price=request.price,
@@ -274,9 +284,19 @@ def delete_trade(trade_id: int) -> PortfolioDeleteResponse:
 def create_cash_ledger(request: PortfolioCashLedgerCreateRequest) -> PortfolioEventCreatedResponse:
     service = PortfolioService()
     try:
+        # Parse event_date from ISO format string to date object
+        # Supports both YYYY-MM-DD and YYYY-MM-DDTHH:MM:SS formats
+        event_date_str = request.event_date.strip()
+        if 'T' in event_date_str:
+            # Has time component, parse as datetime then extract date
+            event_date_obj = datetime.fromisoformat(event_date_str).date()
+        else:
+            # Date only
+            event_date_obj = date.fromisoformat(event_date_str)
+        
         data = service.record_cash_ledger(
             account_id=request.account_id,
-            event_date=request.event_date,
+            event_date=event_date_obj,
             direction=request.direction,
             amount=request.amount,
             currency=request.currency,
@@ -355,10 +375,20 @@ def delete_cash_ledger(entry_id: int) -> PortfolioDeleteResponse:
 def create_corporate_action(request: PortfolioCorporateActionCreateRequest) -> PortfolioEventCreatedResponse:
     service = PortfolioService()
     try:
+        # Parse effective_date from ISO format string to date object
+        # Supports both YYYY-MM-DD and YYYY-MM-DDTHH:MM:SS formats
+        effective_date_str = request.effective_date.strip()
+        if 'T' in effective_date_str:
+            # Has time component, parse as datetime then extract date
+            effective_date_obj = datetime.fromisoformat(effective_date_str).date()
+        else:
+            # Date only
+            effective_date_obj = date.fromisoformat(effective_date_str)
+        
         data = service.record_corporate_action(
             account_id=request.account_id,
             symbol=request.symbol,
-            effective_date=request.effective_date,
+            effective_date=effective_date_obj,
             action_type=request.action_type,
             market=request.market,
             currency=request.currency,

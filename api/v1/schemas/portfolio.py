@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -47,7 +47,7 @@ class PortfolioAccountListResponse(BaseModel):
 class PortfolioTradeCreateRequest(BaseModel):
     account_id: int
     symbol: str = Field(..., min_length=1, max_length=16)
-    trade_date: date
+    trade_date: str = Field(..., description="Trade date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
     side: Literal["buy", "sell"]
     quantity: float = Field(..., gt=0)
     price: float = Field(..., gt=0)
@@ -61,7 +61,7 @@ class PortfolioTradeCreateRequest(BaseModel):
 
 class PortfolioCashLedgerCreateRequest(BaseModel):
     account_id: int
-    event_date: date
+    event_date: str = Field(..., description="Event date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
     direction: Literal["in", "out"]
     amount: float = Field(..., gt=0)
     currency: Optional[str] = Field(None, min_length=3, max_length=8)
@@ -71,7 +71,7 @@ class PortfolioCashLedgerCreateRequest(BaseModel):
 class PortfolioCorporateActionCreateRequest(BaseModel):
     account_id: int
     symbol: str = Field(..., min_length=1, max_length=16)
-    effective_date: date
+    effective_date: str = Field(..., description="Effective date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
     action_type: Literal["cash_dividend", "split_adjustment"]
     market: Optional[Literal["cn", "hk", "us"]] = None
     currency: Optional[str] = Field(None, min_length=3, max_length=8)

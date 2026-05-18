@@ -5,7 +5,6 @@ import { portfolioApi } from '../api/portfolio';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { ApiErrorAlert, Card, Badge, ConfirmDialog, EmptyState, InlineAlert } from '../components/common';
-import { toDateInputValue } from '../utils/format';
 import type {
   PortfolioAccountItem,
   PortfolioCashDirection,
@@ -64,8 +63,15 @@ const PORTFOLIO_SELECT_CLASS = `${PORTFOLIO_INPUT_CLASS} appearance-none pr-10`;
 const PORTFOLIO_FILE_PICKER_CLASS =
   'input-surface input-focus-glow flex h-11 w-full cursor-pointer items-center justify-center rounded-xl border bg-transparent px-4 text-sm transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60';
 
-function getTodayIso(): string {
-  return toDateInputValue(new Date());
+function getNowIsoDatetime(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 function formatMoney(value: number | undefined | null, currency = 'CNY'): string {
@@ -307,7 +313,7 @@ const PortfolioPage: React.FC = () => {
 
   const [tradeForm, setTradeForm] = useState({
     symbol: '',
-    tradeDate: getTodayIso(),
+    tradeDate: getNowIsoDatetime(),
     side: 'buy' as PortfolioSide,
     quantity: '',
     price: '',
@@ -338,7 +344,7 @@ const PortfolioPage: React.FC = () => {
     return fee.toFixed(2);
   }, []);
   const [cashForm, setCashForm] = useState({
-    eventDate: getTodayIso(),
+    eventDate: getNowIsoDatetime(),
     direction: 'in' as PortfolioCashDirection,
     amount: '',
     currency: '',
@@ -346,7 +352,7 @@ const PortfolioPage: React.FC = () => {
   });
   const [corpForm, setCorpForm] = useState({
     symbol: '',
-    effectiveDate: getTodayIso(),
+    effectiveDate: getNowIsoDatetime(),
     actionType: 'cash_dividend' as PortfolioCorporateActionType,
     cashDividendPerShare: '',
     splitRatio: '',
@@ -1359,7 +1365,7 @@ const PortfolioPage: React.FC = () => {
             <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码（例如 600519）" value={tradeForm.symbol}
               onChange={(e) => setTradeForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
             <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={tradeForm.tradeDate}
+              <input className={PORTFOLIO_INPUT_CLASS} type="datetime-local" value={tradeForm.tradeDate}
                 onChange={(e) => setTradeForm((prev) => ({ ...prev, tradeDate: e.target.value }))} required />
               <select className={PORTFOLIO_SELECT_CLASS} value={tradeForm.side}
                 onChange={(e) => setTradeForm((prev) => ({ ...prev, side: e.target.value as PortfolioSide }))}>
@@ -1421,7 +1427,7 @@ const PortfolioPage: React.FC = () => {
           <h3 className="text-sm font-semibold text-foreground mb-3">手工录入：资金流水</h3>
           <form className="space-y-2" onSubmit={handleCashSubmit}>
             <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={cashForm.eventDate}
+              <input className={PORTFOLIO_INPUT_CLASS} type="datetime-local" value={cashForm.eventDate}
                 onChange={(e) => setCashForm((prev) => ({ ...prev, eventDate: e.target.value }))} required />
               <select className={PORTFOLIO_SELECT_CLASS} value={cashForm.direction}
                 onChange={(e) => setCashForm((prev) => ({ ...prev, direction: e.target.value as PortfolioCashDirection }))}>
@@ -1443,7 +1449,7 @@ const PortfolioPage: React.FC = () => {
             <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码" value={corpForm.symbol}
               onChange={(e) => setCorpForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
             <div className="grid grid-cols-2 gap-2">
-              <input className={PORTFOLIO_INPUT_CLASS} type="date" value={corpForm.effectiveDate}
+              <input className={PORTFOLIO_INPUT_CLASS} type="datetime-local" value={corpForm.effectiveDate}
                 onChange={(e) => setCorpForm((prev) => ({ ...prev, effectiveDate: e.target.value }))} required />
               <select className={PORTFOLIO_SELECT_CLASS} value={corpForm.actionType}
                 onChange={(e) => setCorpForm((prev) => ({ ...prev, actionType: e.target.value as PortfolioCorporateActionType }))}>
