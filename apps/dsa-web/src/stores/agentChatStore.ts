@@ -227,7 +227,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
     const skillName = skillNames.join('、');
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: generateUUID(),
       role: 'user',
       content: payload.message,
       skills: payload.skills,
@@ -320,7 +320,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
           messages: [
             ...s.messages,
             {
-              id: (Date.now() + 1).toString(),
+              id: generateUUID(),
               role: 'assistant',
               content: finalContent || '（无内容）',
               skills: payload.skills,

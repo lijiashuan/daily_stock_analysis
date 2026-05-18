@@ -596,7 +596,7 @@ async def export_chat_session(
 )
 async def export_chat_message(
     session_id: str,
-    message_id: str = Query(..., description="ID of the message to export"),
+    message_id: str = Query(..., description="ID or index of the message to export"),
     format: ExportFormatEnum = Query(ExportFormatEnum.MD, description="Export format"),
 ) -> Any:
     """
@@ -604,6 +604,10 @@ async def export_chat_message(
     
     This endpoint allows exporting individual messages in various formats.
     The message content is converted using ReportExportService for consistent formatting.
+    
+    Note: message_id can be either:
+    - A numeric string representing the message index (0-based)
+    - The actual message ID from the database
     """
     from fastapi.responses import FileResponse, Response
     from pathlib import Path
@@ -627,10 +631,21 @@ async def export_chat_message(
         
         # Find the specific message
         target_message = None
-        for msg in messages:
-            if msg.get('id') == message_id:
-                target_message = msg
-                break
+        
+        # Try to interpret message_id as an index first (for frontend compatibility)
+        try:
+            msg_index = int(message_id)
+            if 0 <= msg_index < len(messages):
+                target_message = messages[msg_index]
+        except (ValueError, IndexError):
+            pass
+        
+        # If not found by index, try to find by ID
+        if not target_message:
+            for msg in messages:
+                if msg.get('id') == message_id:
+                    target_message = msg
+                    break
         
         if not target_message:
             raise HTTPException(

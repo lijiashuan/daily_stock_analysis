@@ -435,9 +435,12 @@ const ChatPage: React.FC = () => {
       setExportingMessageId(msg.id);
       setExportMenuOpen(null);
       
-      // Call the new backend API for single message export
+      // Find the index of this message in the messages array
+      const messageIndex = messages.findIndex(m => m.id === msg.id);
+      
+      // Call the new backend API for single message export using index
       const { agentApi } = await import('../api/agent');
-      const blob = await agentApi.exportChatMessage(sessionId, msg.id, format);
+      const blob = await agentApi.exportChatMessage(sessionId, messageIndex.toString(), format);
       
       // Trigger download
       const url = URL.createObjectURL(blob);
@@ -454,7 +457,7 @@ const ChatPage: React.FC = () => {
     } finally {
       setExportingMessageId(null);
     }
-  }, [sessionId]);
+  }, [sessionId, messages]);
 
   const getCurrentStage = (steps: ProgressStep[]): string => {
     if (steps.length === 0) return '正在连接...';
