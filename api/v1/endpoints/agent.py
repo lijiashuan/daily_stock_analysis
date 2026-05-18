@@ -679,6 +679,10 @@ async def export_chat_message(
         time_str = now.strftime("%H%M")
         filename_base = f"{role_label}_消息_{date_str}_{time_str}"
         
+        # URL-encode filename for HTTP headers (latin-1 safe)
+        from urllib.parse import quote
+        encoded_filename_base = quote(filename_base, safe='')
+        
         # Export based on format
         if format == ExportFormatEnum.MD:
             # Add UTF-8 BOM to ensure proper encoding in all editors
@@ -687,7 +691,7 @@ async def export_chat_message(
                 content=markdown_with_bom.encode('utf-8'),
                 media_type="text/markdown;charset=utf-8",
                 headers={
-                    "Content-Disposition": f"attachment; filename*=UTF-8''{filename_base}.md"
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename_base}.md"
                 }
             )
         
