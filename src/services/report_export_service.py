@@ -96,15 +96,59 @@ class ReportExportService:
                 elif line == '---':
                     doc.add_paragraph('_' * 50)
 
-                # 表格检测 (简单实现)
-                elif line.startswith('|') and i + 1 < len(lines) and lines[i + 1].strip().startswith('|'):
-                    # 跳过表格行,后续可以增强表格支持
-                    table_lines = []
+                # 表格检测 - 支持完整的表格解析
+                elif line.startswith('|'):
+                    # 收集表格的所有行
+                    table_rows = []
                     while i < len(lines) and lines[i].strip().startswith('|'):
-                        table_lines.append(lines[i])
+                        row_line = lines[i].strip()
+                        # 解析表格行：去除首尾的 | 并按 | 分割
+                        cells = [cell.strip() for cell in row_line.split('|') if cell.strip()]
+                        # 跳过表格分隔行（全是 --- 的行）
+                        if cells and all(c.startswith('---') for c in cells):
+                            i += 1
+                            continue
+                        table_rows.append(cells)
                         i += 1
-                    # TODO: 可以在这里添加表格解析逻辑
-                    continue
+                    
+                    # 如果收集到了表格数据，创建 Word 表格
+                    if table_rows:
+                        # 检查表格是否完整（每行单元格数一致）
+                        max_cols = max(len(row) for row in table_rows)
+                        # 补齐单元格
+                        for row in table_rows:
+                            while len(row) < max_cols:
+                                row.append('')
+                        
+                        # 创建表格（第一行作为表头）
+                        if len(table_rows) >= 2:
+                            word_table = doc.add_table(rows=len(table_rows), cols=max_cols)
+                            word_table.style = 'Table Grid'
+                            
+                            for row_idx, cells in enumerate(table_rows):
+                                for col_idx, cell_text in enumerate(cells):
+                                    cell = word_table.cell(row_idx, col_idx)
+                                    cell.text = cell_text
+                                    # 设置表头样式
+                                    if row_idx == 0:
+                                        for run in cell.paragraphs[0].runs:
+                                            run.font.name = 'Microsoft YaHei'
+                                            run.font.size = Pt(10)
+                                            run.font.bold = True
+                                    else:
+                                        for run in cell.paragraphs[0].runs:
+                                            run.font.name = 'Microsoft YaHei'
+                                            run.font.size = Pt(10)
+                            
+                            doc.add_paragraph()  # 表格后加空行
+                            continue
+                        else:
+                            # 只有一行的表格，当作普通文本处理
+                            doc.add_paragraph(' | '.join(table_rows[0]))
+                            continue
+                    else:
+                        # 如果表格解析失败，继续处理当前行
+                        pass
 
                 # 列表项
                 elif line.startswith('- ') or line.startswith('* '):

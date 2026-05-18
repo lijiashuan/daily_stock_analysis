@@ -438,6 +438,11 @@ const ChatPage: React.FC = () => {
       // Find the index of this message in the messages array
       const messageIndex = messages.findIndex(m => m.id === msg.id);
       
+      if (messageIndex === -1) {
+        alert('无法导出：找不到该消息');
+        return;
+      }
+      
       // Call the new backend API for single message export using index
       const { agentApi } = await import('../api/agent');
       const blob = await agentApi.exportChatMessage(sessionId, messageIndex.toString(), format);
@@ -943,7 +948,7 @@ const ChatPage: React.FC = () => {
                   </div>
                   <div
                     className={cn(
-                      'group/message min-w-0 w-fit max-w-[min(100%,48rem)] overflow-hidden px-5 py-3.5 transition-colors',
+                      'group/message min-w-0 w-fit max-w-[min(100%,64rem)] overflow-hidden px-5 py-3.5 transition-colors',
                       msg.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai'
                     )}
                   >

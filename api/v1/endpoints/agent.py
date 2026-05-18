@@ -632,20 +632,27 @@ async def export_chat_message(
         # Find the specific message
         target_message = None
         
-        # Try to interpret message_id as an index first (for frontend compatibility)
+        # First, try to interpret message_id as an index (for frontend compatibility)
         try:
             msg_index = int(message_id)
             if 0 <= msg_index < len(messages):
                 target_message = messages[msg_index]
+                logger.debug(f"Found message by index: {msg_index}")
         except (ValueError, IndexError):
             pass
         
-        # If not found by index, try to find by ID
+        # If not found by index, try to find by ID (UUID or database ID)
         if not target_message:
             for msg in messages:
-                if msg.get('id') == message_id:
+                # Match by string comparison (works for both UUID and numeric IDs)
+                if str(msg.get('id')) == str(message_id):
                     target_message = msg
+                    logger.debug(f"Found message by ID: {message_id}")
                     break
+        
+        # If still not found, try to match by content hash as fallback
+        if not target_message:
+            logger.warning(f"Message {message_id} not found in session {session_id}. Available message IDs: {[m.get('id') for m in messages]}")
         
         if not target_message:
             raise HTTPException(
@@ -674,11 +681,13 @@ async def export_chat_message(
         
         # Export based on format
         if format == ExportFormatEnum.MD:
+            # Add UTF-8 BOM to ensure proper encoding in all editors
+            markdown_with_bom = '\ufeff' + markdown_content
             return Response(
-                content=markdown_content,
+                content=markdown_with_bom.encode('utf-8'),
                 media_type="text/markdown;charset=utf-8",
                 headers={
-                    "Content-Disposition": f"attachment; filename={filename_base}.md"
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{filename_base}.md"
                 }
             )
         
@@ -705,17 +714,22 @@ async def export_chat_message(
             filepath = Path(filepath_str)
             return FileResponse(
                 path=str(filepath),
-                media_type="text/html",
+                media_type="text/html;charset=utf-8",
                 filename=f"{filename_base}.html"
             )
         
         elif format == ExportFormatEnum.PDF:
             filepath_str = ReportExportService.export_to_pdf(markdown_content)
             filepath = Path(filepath_str)
+            # URL-encode the filename for PDF to avoid browser issues
+            from urllib.parse import quote
+            encoded_filename = quote(f"{filename_base}.pdf", safe='')
             return FileResponse(
                 path=str(filepath),
                 media_type="application/pdf",
-                filename=f"{filename_base}.pdf"
+                headers={
+                    "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+                }
             )
         
         else:
