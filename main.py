@@ -957,6 +957,22 @@ def main() -> int:
                 else:
                     logger.info("EventMonitor 已启用，但未加载到有效规则，跳过后台提醒任务")
 
+            # 添加价格监盘后台任务（默认 5 分钟检查一次）
+            price_monitor_interval = getattr(config, 'price_monitor_interval_minutes', 5)
+
+            def price_monitor_task():
+                from src.services.price_monitor import run_price_monitor_once
+                triggered = run_price_monitor_once()
+                if triggered:
+                    logger.info("[PriceMonitor] 本轮触发 %d 条价格预警", len(triggered))
+
+            background_tasks.append({
+                "task": price_monitor_task,
+                "interval_seconds": price_monitor_interval * 60,
+                "run_immediately": False,  # 不立即执行，等待用户加载规则后自动开始
+                "name": "price_monitor",
+            })
+
             run_with_schedule(
                 task=scheduled_task,
                 schedule_time=config.schedule_time,

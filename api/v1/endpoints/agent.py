@@ -750,3 +750,158 @@ async def export_chat_message(
                 "message": f"Export failed: {str(e)}"
             }
         )
+
+
+class TestAlertRequest(BaseModel):
+    """Test alert push request."""
+    stock_code: str
+    stock_name: str
+    operation: str
+    watch_price: float
+    note: str
+
+
+class TestAlertResponse(BaseModel):
+    """Test alert push response."""
+    success: bool
+    message: str
+    channel: str = "feishu"
+
+
+@router.post("/test-alert", response_model=TestAlertResponse)
+async def test_feishu_alert(request: TestAlertRequest):
+    """
+    Send a test price alert to Feishu webhook.
+    """
+    from src.config import get_config
+    from src.notification_sender.feishu_sender import FeishuSender
+
+    config = get_config()
+
+    if not getattr(config, 'feishu_webhook_url', None):
+        raise HTTPException(
+            status_code=400,
+            detail="FEISHU_WEBHOOK_URL not configured. Please set it in Settings > Notification > Feishu."
+        )
+
+    sender = FeishuSender(config)
+
+    # Build test alert message
+    alert_message = f"🧪 测试预警 | {request.stock_name}\n\n【模拟触发通知】\n股票：{request.stock_name}（{request.stock_code}）\n建议操作：{request.operation}\n触发价位：¥{request.watch_price}\n说明：{request.note}\n\n—— 这是一条测试消息，收到即表示推送通道正常 ——"
+
+    try:
+        loop = asyncio.get_running_loop()
+        success = await loop.run_in_executor(
+            None,
+            lambda: sender.send_to_feishu(alert_message),
+        )
+
+        if success:
+            return TestAlertResponse(
+                success=True,
+                message=f"测试预警已成功发送至飞书：{request.stock_name}（{request.stock_code}）",
+            )
+        else:
+            return TestAlertResponse(
+                success=False,
+                message="飞书推送失败，请检查 Webhook 配置和日志。",
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to send test alert to Feishu: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "alert_send_failed",
+                "message": f"Failed to send alert: {str(e)}"
+            }
+        )
+
+
+# ========================
+# Price Monitor APIs
+# ========================
+
+class MonitorLoadRulesRequest(BaseModel):
+    """Load watch rules from dashboard data."""
+    watch_prices: Dict[str, Dict]
+
+
+class MonitorStatusResponse(BaseModel):
+    """Monitor status response."""
+    enabled: bool
+    rule_count: int
+    rules: List[Dict]
+    last_check_time: Optional[str] = None
+    check_count: int = 0
+    trigger_count: int = 0
+    push_success_count: int = 0
+    push_fail_count: int = 0
+
+
+@router.get("/monitor/status", response_model=MonitorStatusResponse)
+async def get_monitor_status():
+    """Get price monitor status."""
+    from src.services.price_monitor import get_price_monitor
+    monitor = get_price_monitor()
+    status = monitor.get_status()
+    return MonitorStatusResponse(**status)
+
+
+@router.post("/monitor/enable")
+async def enable_monitor():
+    """Enable price monitor."""
+    from src.services.price_monitor import get_price_monitor
+    monitor = get_price_monitor()
+    monitor.enable()
+    return {"success": True, "message": "自动监盘已启用"}
+
+
+@router.post("/monitor/disable")
+async def disable_monitor():
+    """Disable price monitor."""
+    from src.services.price_monitor import get_price_monitor
+    monitor = get_price_monitor()
+    monitor.disable()
+    return {"success": True, "message": "自动监盘已关闭"}
+
+
+@router.post("/monitor/load-rules")
+async def load_monitor_rules(request: MonitorLoadRulesRequest):
+    """Load watch rules from dashboard data."""
+    from src.services.price_monitor import get_price_monitor
+    monitor = get_price_monitor()
+    monitor.load_from_dashboard(request.watch_prices)
+    return {
+        "success": True,
+        "message": f"已加载 {len(request.watch_prices)} 条预警规则",
+        "rule_count": len(request.watch_prices),
+    }
+
+
+@router.post("/monitor/reset-rule/{stock_code}")
+async def reset_monitor_rule(stock_code: str):
+    """Reset a watch rule's trigger status (allow re-push)."""
+    from src.services.price_monitor import get_price_monitor
+    monitor = get_price_monitor()
+    monitor.reset_rule_status(stock_code)
+    return {"success": True, "message": f"已重置 {stock_code} 的推送状态"}
+
+
+@router.post("/monitor/check")
+async def trigger_monitor_check():
+    """Manually trigger a monitor check."""
+    from src.services.price_monitor import run_price_monitor_once
+    triggered = run_price_monitor_once()
+    return {
+        "success": True,
+        "triggered_count": len(triggered),
+        "triggered_rules": [
+            {
+                "stock_code": r.stock_code,
+                "stock_name": r.stock_name,
+                "watch_price": r.watch_price,
+            }
+            for r in triggered
+        ],
+    }
