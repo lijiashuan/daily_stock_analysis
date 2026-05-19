@@ -592,6 +592,11 @@ class Config:
     # VISION_PROVIDER_PRIORITY: comma-separated provider order for Vision fallback.
     vision_provider_priority: str = "gemini,anthropic,openai"
 
+    # === 百度智能云 OCR 配置（用于图片股票代码识别）===
+    baidu_ocr_app_id: str = ""  # 百度智能云应用 ID
+    baidu_ocr_api_key: str = ""  # 百度智能云 API Key
+    baidu_ocr_secret_key: str = ""  # 百度智能云 Secret Key
+
     # === 搜索引擎配置（支持多 Key 负载均衡）===
     anspire_api_keys: List[str] = field(default_factory=list)  # Anspire Search API Keys
     bocha_api_keys: List[str] = field(default_factory=list)  # Bocha API Keys
@@ -1336,6 +1341,10 @@ class Config:
                 or ""
             ),
             vision_provider_priority=os.getenv('VISION_PROVIDER_PRIORITY', 'gemini,anthropic,openai'),
+            # 百度智能云 OCR 配置
+            baidu_ocr_app_id=os.getenv('BAIDU_OCR_APP_ID', ''),
+            baidu_ocr_api_key=os.getenv('BAIDU_OCR_API_KEY', ''),
+            baidu_ocr_secret_key=os.getenv('BAIDU_OCR_SECRET_KEY', ''),
             anspire_api_keys=anspire_api_keys,
             bocha_api_keys=bocha_api_keys,
             minimax_api_keys=minimax_api_keys,

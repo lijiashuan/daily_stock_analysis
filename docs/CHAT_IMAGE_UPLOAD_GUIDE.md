@@ -4,6 +4,38 @@
 
 在 `/chat` 页面新增了**图片导入功能**，允许用户上传股票相关的截图（如 K 线图、技术指标截图、自选股列表等），由 AI 自动识别图中的股票信息并进行分析。
 
+## 配置方法
+
+### 1. 获取百度智能云 API Key
+
+1. 访问 [百度智能云控制台](https://console.bce.baidu.com/ai/)
+2. 注册/登录账号
+3. 创建应用，开通**通用文字识别**服务
+4. 获取 `App ID`、`API Key`、`Secret Key`
+
+### 2. 配置环境变量
+
+在 `.env` 文件中添加以下配置：
+
+```bash
+# 百度智能云 OCR 配置
+BAIDU_OCR_APP_ID=你的AppID
+BAIDU_OCR_API_KEY=你的APIKey
+BAIDU_OCR_SECRET_KEY=你的SecretKey
+```
+
+### 3. 安装依赖
+
+```bash
+pip install baidu-aip
+```
+
+### 4. 重启服务
+
+```bash
+python main.py --webui-only
+```
+
 ## 使用方法
 
 ### 1. 上传图片
@@ -58,12 +90,22 @@
 ### 后端
 - **API 端点**: `/api/v1/agent/chat/stream`
 - **图片处理**: `src/services/image_stock_extractor.py`
-- **Vision LLM**: 支持 Gemini/Anthropic/OpenAI 多模型
+- **OCR 引擎**: 百度智能云 OCR（通用文字识别高精度版）
+- **SDK**: baidu-aip
 
 ### 前端
-- **状态管理**: `selectedImage`, `imagePreview`, `imageData`
-- **消息显示**: 用户消息支持显示图片缩略图
-- **API 调用**: Base64 编码传输图片数据
+- **组件**: `apps/dsa-web/src/pages/ChatPage.tsx`
+- **文件上传**: HTML5 File API
+- **预览**: Base64 Data URL
+
+## 优势
+
+使用百度智能云 OCR 的优势：
+- ✅ **速度快**：OCR 识别通常比 Vision LLM 快 3-5 倍
+- ✅ **成本低**：每天 500 次免费额度，超出后也非常便宜
+- ✅ **准确率高**：专门优化的中文识别引擎
+- ✅ **稳定性好**：国内服务，无网络延迟
+- ✅ **支持离线**：可下载离线 SDK（需购买授权）
 
 ## 识别效果
 
@@ -76,6 +118,8 @@
 
 ## 注意事项
 
-- 图片识别需要消耗 Vision API 的 tokens
-- 确保已配置 LLM API Key（GEMINI_API_KEYS / ANTHROPIC_API_KEYS / OPENAI_API_KEYS）
+- 图片识别需要消耗百度智能云 OCR 的调用次数（每天 500 次免费）
+- 确保已正确配置 BAIDU_OCR_APP_ID、BAIDU_OCR_API_KEY、BAIDU_OCR_SECRET_KEY
 - 识别结果会显示在 SSE 流中（`image_recognized` 事件）
+- 支持图片格式：JPEG、PNG、WebP、GIF
+- 最大文件大小：5MB

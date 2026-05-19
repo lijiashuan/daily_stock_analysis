@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-图片股票代码提取 (Vision LLM)
+图片股票代码提取 (百度智能云 OCR)
 ===================================
 
-从截图/图片中提取股票代码，使用 Vision LLM。
-优先级：Gemini -> Anthropic -> OpenAI（首个可用）。
+从截图/图片中提取股票代码，使用百度智能云 OCR API。
+支持通用文字识别和高精度识别。
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import json
 import logging
 import random
 import re
-import sys
 import time
 from typing import List, Optional, Tuple
 
@@ -23,27 +22,25 @@ from src.config import Config, get_config
 
 logger = logging.getLogger(__name__)
 
+# 百度智能云 OCR SDK
+try:
+    from aip import AipOcr
+    BAIDU_AIP_AVAILABLE = True
+except ImportError:
+    BAIDU_AIP_AVAILABLE = False
+    AipOcr = None
 
-class _LiteLLMPlaceholder:
-    """Provide a patchable placeholder before litellm is imported."""
+EXTRACT_PROMPT = """请分析以下股票市场截图中的文字内容，提取其中所有可见的股票代码及名称。
 
-    completion = None
-
-
-# Keep a patchable module attribute while still avoiding a hard import at module load.
-litellm = sys.modules.get("litellm") or _LiteLLMPlaceholder()
-
-EXTRACT_PROMPT = """请分析这张股票市场截图或图片，提取其中所有可见的股票代码及名称。
-
-重要：若图中同时显示股票名称和代码（如自选股列表、ETF 列表），必须同时提取两者，每个元素必须包含 code 和 name 字段。
+重要：若文本中包含股票名称和代码（如自选股列表、ETF 列表），必须同时提取两者。
 
 输出格式：仅返回有效的 JSON 数组，不要 markdown、不要解释。
 每个元素为对象：{"code":"股票代码","name":"股票名称","confidence":"high|medium|low"}
 - code: 必填，股票代码（A股6位、港股5位、美股1-5字母、ETF 如 159887/512880）
-- name: 若图中有名称则必填（如 贵州茅台、银行ETF、证券ETF），与代码一一对应；仅当图中确实无名称时可省略
+- name: 若文本中有名称则必填（如 贵州茅台、银行ETF、证券ETF），与代码一一对应；仅当确实无名称时可省略
 - confidence: 必填，识别置信度，high=确定、medium=较确定、low=不确定
 
-示例（图中同时有名称和代码时）：
+示例（文本中同时有名称和代码时）：
 - 个股：600519 贵州茅台、300750 宁德时代
 - 港股：00700 腾讯控股、09988 阿里巴巴
 - 美股：AAPL 苹果、TSLA 特斯拉
@@ -207,77 +204,59 @@ def _parse_items_from_text(text: str) -> List[Tuple[str, Optional[str], str]]:
     return [(c, None, "medium") for c in codes]
 
 
-def _resolve_vision_model() -> str:
-    """Determine the litellm model to use for vision."""
-    cfg = get_config()
-    # Prefer explicit vision model, then OPENAI_VISION_MODEL alias, then primary litellm model
-    model = (cfg.vision_model or cfg.openai_vision_model or cfg.litellm_model or "").strip()
-    if not model:
-        # Fallback: infer from available keys
-        if cfg.gemini_api_keys:
-            model_name = cfg.gemini_model or "gemini-3.1-pro-preview"
-            model = model_name if "/" in model_name else f"gemini/{model_name}"
-        elif cfg.anthropic_api_keys:
-            model = f"anthropic/{cfg.anthropic_model or 'claude-sonnet-4-6'}"
-        elif cfg.openai_api_keys:
-            model = f"openai/{cfg.openai_model or 'gpt-5.5'}"
-        else:
-            return ""
-    return model
+def _init_baidu_ocr_client(cfg: Config):
+    """初始化百度智能云 OCR 客户端"""
+    if not BAIDU_AIP_AVAILABLE:
+        raise ValueError(
+            "百度智能云 SDK 未安装，请执行: pip install baidu-aip"
+        )
+    
+    if not cfg.baidu_ocr_app_id or not cfg.baidu_ocr_api_key or not cfg.baidu_ocr_secret_key:
+        raise ValueError(
+            "未配置百度智能云 OCR。请设置 BAIDU_OCR_APP_ID、BAIDU_OCR_API_KEY 和 BAIDU_OCR_SECRET_KEY。"
+        )
+    
+    return AipOcr(cfg.baidu_ocr_app_id, cfg.baidu_ocr_api_key, cfg.baidu_ocr_secret_key)
 
 
-def _get_api_keys_for_model(model: str, cfg: Config) -> List[str]:
-    """Return available API keys for the given litellm model."""
-    if model.startswith("gemini/") or model.startswith("vertex_ai/"):
-        return [k for k in cfg.gemini_api_keys if k and len(k) >= 8]
-    if model.startswith("anthropic/"):
-        return [k for k in cfg.anthropic_api_keys if k and len(k) >= 8]
-    return [k for k in cfg.openai_api_keys if k and len(k) >= 8]
-
-
-def _call_litellm_vision(image_b64: str, mime_type: str, api_key: Optional[str] = None) -> str:
-    """Extract stock codes from an image using litellm (all providers via OpenAI vision format)."""
-    global litellm
-    cfg = get_config()
-    model = _resolve_vision_model()
-    if not model:
-        raise ValueError("未配置 Vision API。请设置 LITELLM_MODEL 或相关 API Key。")
-
-    keys = _get_api_keys_for_model(model, cfg)
-    if not keys:
-        raise ValueError(f"No API key found for vision model {model}")
-    key = api_key if api_key and api_key in keys else random.choice(keys)
-
-    data_url = f"data:{mime_type};base64,{image_b64}"
-    call_kwargs: dict = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": EXTRACT_PROMPT},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            }
-        ],
-        "max_tokens": 1024,
-        "api_key": key,
-        "timeout": VISION_API_TIMEOUT,
+def _call_baidu_ocr(image_bytes: bytes, mime_type: str, cfg: Config) -> str:
+    """使用百度智能云 OCR 识别图片中的文字"""
+    client = _init_baidu_ocr_client(cfg)
+    
+    # 使用通用文字识别（高精度版）
+    # 参考: https://cloud.baidu.com/doc/OCR/s/zk3h7xz52
+    options = {
+        "language_type": "CHN_ENG",  # 中英文混合
+        "detect_direction": "true",  # 检测图片朝向
+        "detect_language": "true",   # 检测语言
+        "probability": "true",       # 返回置信度
     }
-    # Add api_base and custom headers for OpenAI-compatible providers
-    if not model.startswith("gemini/") and not model.startswith("anthropic/") and not model.startswith("vertex_ai/"):
-        if cfg.openai_base_url:
-            call_kwargs["api_base"] = cfg.openai_base_url
-        if cfg.openai_base_url and "aihubmix.com" in cfg.openai_base_url:
-            call_kwargs["extra_headers"] = {"APP-Code": "GPIJ3886"}
-
-    if getattr(litellm, "completion", None) is None:
-        import litellm as litellm_module
-        litellm = litellm_module
-    response = litellm.completion(**call_kwargs)
-    if response and response.choices and response.choices[0].message.content:
-        return response.choices[0].message.content
-    raise ValueError("LiteLLM vision returned empty response")
+    
+    try:
+        # 调用通用文字识别 API
+        result = client.basicAccurate(image_bytes, options)
+        
+        if "error_code" in result:
+            error_code = result.get("error_code")
+            error_msg = result.get("error_msg", "Unknown error")
+            raise ValueError(f"百度 OCR 调用失败: error_code={error_code}, error_msg={error_msg}")
+        
+        # 提取识别结果
+        words_result = result.get("words_result", [])
+        if not words_result:
+            logger.warning("[ImageExtractor] 百度 OCR 返回空结果")
+            return ""
+        
+        # 合并所有识别出的文字
+        text_lines = [item.get("words", "") for item in words_result if "words" in item]
+        full_text = "\n".join(text_lines)
+        
+        logger.debug(f"[ImageExtractor] 百度 OCR 识别结果:\n{full_text}")
+        return full_text
+        
+    except Exception as e:
+        logger.error(f"[ImageExtractor] 百度 OCR 调用异常: {e}")
+        raise
 
 
 def extract_stock_codes_from_image(
@@ -285,9 +264,8 @@ def extract_stock_codes_from_image(
     mime_type: str,
 ) -> Tuple[List[Tuple[str, Optional[str], str]], str]:
     """
-    从图片中提取股票代码及名称（使用 Vision LLM）。
+    从图片中提取股票代码及名称（使用百度智能云 OCR）。
 
-    优先级：Gemini -> Anthropic -> OpenAI（首个可用）。
     支持多 Key 轮询与重试（最多 3 次，指数退避）。
 
     Args:
@@ -295,10 +273,10 @@ def extract_stock_codes_from_image(
         mime_type: MIME 类型（如 image/jpeg, image/png）
 
     Returns:
-        (items, raw_text) - items 为 [(code, name?, confidence), ...]，raw_text 为原始 LLM 响应。
+        (items, raw_text) - items 为 [(code, name?, confidence), ...]，raw_text 为原始 OCR 响应。
 
     Raises:
-        ValueError: 图片无效、未配置 Vision API 或提取失败时。
+        ValueError: 图片无效、未配置 OCR API 或提取失败时。
     """
     mime_type = (mime_type or "image/jpeg").strip().lower().split(";")[0].strip()
     if mime_type not in ALLOWED_MIME:
@@ -312,22 +290,26 @@ def extract_stock_codes_from_image(
 
     _verify_image_magic_bytes(image_bytes, mime_type)
 
-    image_b64 = base64.b64encode(image_bytes).decode("ascii")
-    model = _resolve_vision_model()
-    keys = _get_api_keys_for_model(model, get_config())
-
+    cfg = get_config()
     last_error: Optional[Exception] = None
+    
     for attempt in range(3):
         try:
-            key = random.choice(keys) if keys else None
-            raw = _call_litellm_vision(image_b64, mime_type, api_key=key)
-            logger.debug("[ImageExtractor] raw LLM response:\n%s", raw)
-            items = _parse_items_from_text(raw)
+            # 调用百度 OCR 识别图片文字
+            raw_text = _call_baidu_ocr(image_bytes, mime_type, cfg)
+            
+            if not raw_text:
+                logger.info("[ImageExtractor] 百度 OCR 返回空文本")
+                return [], ""
+            
+            # 从识别的文本中解析股票代码
+            items = _parse_items_from_text(raw_text)
             logger.info(
-                f"[ImageExtractor] {model} 提取 {len(items)} 个: "
+                f"[ImageExtractor] 百度 OCR 提取 {len(items)} 个: "
                 f"{[(i[0], i[1]) for i in items[:5]]}{'...' if len(items) > 5 else ''}"
             )
-            return items, raw
+            return items, raw_text
+            
         except Exception as e:
             last_error = e
             if attempt < 2:
@@ -336,5 +318,5 @@ def extract_stock_codes_from_image(
                 time.sleep(delay)
 
     raise ValueError(
-        f"Vision API 调用失败，请检查 API Key 与网络: {last_error}"
+        f"百度 OCR API 调用失败，请检查配置与网络: {last_error}"
     ) from last_error

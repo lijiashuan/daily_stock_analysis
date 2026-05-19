@@ -37,6 +37,10 @@ tiktoken>=0.8.0,<0.12.0    # BPE tokenizer for LLM token counting (pin <0.12 to 
 openai>=1.0.0               # OpenAI SDK (transitive dependency of litellm, kept explicit)
 PyYAML>=6.0                 # YAML parser for LITELLM_CONFIG support
 
+# 百度智能云 OCR（图片文字识别）
+baidu-aip>=4.16.0           # 百度智能云 AI SDK
+chardet>=5.0.0             # 字符编码检测（baidu-aip 依赖）
+
 # 搜索引擎（用于获取股票新闻）
 tavily-python>=0.3.0        # Tavily 搜索 API（每月 1000 次免费）
 google-search-results>=2.4.0  # SerpAPI（每月 100 次免费）
