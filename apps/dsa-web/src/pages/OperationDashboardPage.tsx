@@ -2,19 +2,153 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, ArrowDown, ArrowUp, Bell, CheckCircle2, Clock, Eye, FileJson, RefreshCw, Target, Trash2, Loader2, X } from 'lucide-react';
 import { cn } from '../utils/cn';
 
-// Types
+// Types for v2.0 format
 interface MarketIndex {
+  close: number;
+  change_pct: number;
+  trend: string;
+}
+
+interface MarketIndexes {
+  shanghai: MarketIndex;
+  chi_next50: MarketIndex;
+  shanghai50: MarketIndex;
+}
+
+interface OrderTrigger {
+  type: string;
+  value: number;
+}
+
+interface Order {
+  id: string;
+  stock_code: string;
+  stock_name: string;
+  direction: 'buy' | 'sell';
+  order_type: string;
+  quantity: number;
+  price: number;
+  trigger: OrderTrigger;
+  priority: number;
+  validity: string;
+  reason: string;
+}
+
+interface Position {
+  stock_code: string;
+  stock_name: string;
+  shares: number;
+  avg_cost: number;
+  last_price: number;
+  day_change_pct: number;
+  unrealized_pnl: number;
+  weight_pct: number;
+  score: number;
+  ma_status: string;
+  stop_loss: number;
+  action: 'hold' | 'add' | 'reduce' | 'sell';
+  note: string;
+}
+
+interface ExecutionLogEntry {
+  time: string;
+  action: string;
+  stock: string;
+  qty: number | string;
+  price?: number;
+  note: string;
+}
+
+// Auto Watch types (v2.0 new)
+interface AutoWatchTrigger {
+  type: string;
+  target?: number;
+  value?: number;
+  source?: string;
+  volume_ratio_threshold?: number;
+  price_above?: number;
+  confirm_bars?: number;
+}
+
+interface AutoWatchCondition {
+  reject_if?: {
+    volume_ratio_below?: number;
+    market_depth_sell_wall_gte?: number;
+    price_drop_to?: number;
+  };
+  cancel_if?: {
+    price_gap_open_above?: number;
+    time_passed?: string;
+  };
+}
+
+interface AutoWatchExecution {
+  mode: 'auto_limit' | 'auto_market' | 'notify_only';
+  limit_price_offset?: number;
+  validity: string;
+  retry_on_fail?: boolean;
+  max_retries?: number;
+}
+
+interface AutoWatch {
+  id: string;
+  stock_code: string;
+  stock_name: string;
+  direction: 'buy' | 'sell' | 'none';
+  quantity: number;
+  max_price?: number;
+  min_price?: number;
+  trigger: AutoWatchTrigger;
+  condition: AutoWatchCondition;
+  execution: AutoWatchExecution;
+  priority: number;
+  reason: string;
+}
+
+interface WatchRules {
+  scan_interval_seconds: number;
+  notify_on_execute: boolean;
+  notify_on_reject: boolean;
+  notify_on_cancel: boolean;
+  fail_safe?: {
+    auto_watch_disable_if_cash_below?: number;
+    max_concurrent_watches?: number;
+  };
+}
+
+interface DashboardDataV2 {
+  dashboard_version: string;
+  generated_at?: string;
+  trade_date?: string;
+  note?: string;
+  summary: {
+    total_assets: number;
+    cash: number;
+    cash_ratio_pct: number;
+    stock_value: number;
+    unrealized_pnl: number;
+    indexes: MarketIndexes;
+  };
+  orders: Order[];
+  positions: Position[];
+  execution_log?: ExecutionLogEntry[];
+  auto_watch?: AutoWatch[];
+  watch_rules?: WatchRules;
+}
+
+// Legacy types for v1.0 format (keep for backward compatibility)
+interface MarketIndexLegacy {
   close: number;
   change_pct: number;
   note: string;
 }
 
 interface MarketContext {
-  shanghai_composite?: MarketIndex;
-  shenzhen_component?: MarketIndex;
-  chi_next_50?: MarketIndex;
-  shanghai_50?: MarketIndex;
-  [key: string]: MarketIndex | undefined;
+  shanghai_composite?: MarketIndexLegacy;
+  shenzhen_component?: MarketIndexLegacy;
+  chi_next_50?: MarketIndexLegacy;
+  shanghai_50?: MarketIndexLegacy;
+  [key: string]: MarketIndexLegacy | undefined;
 }
 
 interface MustDoItem {
@@ -63,7 +197,7 @@ interface WatchPriceItem {
   note: string;
 }
 
-interface DashboardData {
+interface DashboardDataV1 {
   dashboard_version: string;
   generated_at?: string;
   date: string;
@@ -93,6 +227,14 @@ interface DashboardData {
   execution_notes?: string[];
 }
 
+// Union type supporting both versions
+type DashboardData = DashboardDataV1 | DashboardDataV2;
+
+// Type guard for v2.0 format
+const isDashboardV2 = (data: DashboardData): data is DashboardDataV2 => {
+  return data.dashboard_version === '2.0' || 'orders' in data;
+};
+
 interface ExecutionLog {
   id: string;
   stock_code: string;
@@ -101,6 +243,7 @@ interface ExecutionLog {
   quantity: number;
   executed_price?: number;
   executed_at: string;
+  note?: string;
 }
 
 interface PushStatus {
@@ -124,6 +267,7 @@ const OperationDashboardPage: React.FC = () => {
   const [pushStatus, setPushStatus] = useState<PushStatus>({});
   const [autoMonitorEnabled, setAutoMonitorEnabled] = useState(false);
   const [monitorStatus, setMonitorStatus] = useState<{ enabled: boolean; rule_count: number; check_count: number; trigger_count: number; push_success_count: number; push_fail_count: number; last_check_time: string | null } | null>(null);
+  const [isV2, setIsV2] = useState(false); // Track JSON format version
 
   // Load monitor status on mount
   useEffect(() => {
@@ -179,16 +323,30 @@ const OperationDashboardPage: React.FC = () => {
 
   // Load rules to backend when dashboard data changes
   useEffect(() => {
-    // Support both watch_prices and watch_prices_afternoon
-    const watchPrices = dashboardData?.watch_prices || dashboardData?.watch_prices_afternoon;
-    if (watchPrices && Object.keys(watchPrices).length > 0) {
-      loadRulesToBackend(watchPrices);
+    if (isV2) {
+      // v2.0: Load auto_watch rules
+      const v2Data = dashboardData as DashboardDataV2;
+      const autoWatch = v2Data?.auto_watch;
+      if (autoWatch && autoWatch.length > 0) {
+        loadRulesV2ToBackend(autoWatch);
+      }
+    } else {
+      // v1.0: Load watch_prices rules
+      const v1Data = dashboardData as DashboardDataV1;
+      const watchPrices = v1Data?.watch_prices || v1Data?.watch_prices_afternoon;
+      if (watchPrices && Object.keys(watchPrices).length > 0) {
+        loadRulesToBackend(watchPrices);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardData?.watch_prices, dashboardData?.watch_prices_afternoon]);
+  }, [dashboardData, isV2]);
 
   const loadRulesToBackend = async (watchPrices?: Record<string, WatchPriceItem>) => {
-    const prices = watchPrices || dashboardData?.watch_prices || dashboardData?.watch_prices_afternoon;
+    // Only v1.0 has watch_prices
+    if (isV2) return;
+    
+    const v1Data = dashboardData as DashboardDataV1;
+    const prices = watchPrices || v1Data?.watch_prices || v1Data?.watch_prices_afternoon;
     if (!prices) return;
     try {
       await fetch('/api/v1/agent/monitor/load-rules', {
@@ -199,6 +357,25 @@ const OperationDashboardPage: React.FC = () => {
       loadMonitorStatus();
     } catch (err) {
       console.error('Failed to load rules:', err);
+    }
+  };
+
+  // Load rules to backend (v2.0 format)
+  const loadRulesV2ToBackend = async (autoWatch?: AutoWatch[]) => {
+    if (!isV2) return;
+    
+    const v2Data = dashboardData as DashboardDataV2;
+    const rules = autoWatch || v2Data?.auto_watch;
+    if (!rules || rules.length === 0) return;
+    try {
+      await fetch('/api/v1/agent/monitor/load-rules-v2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_watch: rules }),
+      });
+      loadMonitorStatus();
+    } catch (err) {
+      console.error('Failed to load v2 rules:', err);
     }
   };
 
@@ -398,13 +575,46 @@ const OperationDashboardPage: React.FC = () => {
       setError(null);
       const parsed = JSON.parse(rawInput);
       setDashboardData(parsed);
+      
+      // Detect format version
+      const v2Format = isDashboardV2(parsed);
+      setIsV2(v2Format);
+      
+      // For v2.0, load execution_log from JSON
+      if (v2Format && 'execution_log' in parsed && Array.isArray(parsed.execution_log)) {
+        const logs: ExecutionLog[] = (parsed as DashboardDataV2).execution_log!.map((log, idx) => ({
+          id: `exec_${idx}`,
+          stock_code: '', // Will be populated if needed
+          stock_name: log.stock,
+          action: log.action === 'cancel' ? 'sell' : (log.action as 'buy' | 'sell'),
+          quantity: typeof log.qty === 'number' ? log.qty : 0,
+          executed_price: log.price,
+          executed_at: log.time.split(' ')[1] || log.time,
+          note: log.note,
+        }));
+        setExecutionLogs(logs);
+      } else {
+        // For v1.0 or no execution_log, reset
+        setExecutionLogs([]);
+      }
+      
       setPushStatus({});
-      showToast('success', '数据解析成功！');
+      showToast('success', `数据解析成功！${v2Format ? '(v2.0格式)' : '(v1.0格式)'}`);
+      
       // Load rules to backend after parsing
       setTimeout(() => {
-        const watchPrices = parsed.watch_prices || parsed.watch_prices_afternoon;
-        if (watchPrices && Object.keys(watchPrices).length > 0) {
-          loadRulesToBackend(watchPrices);
+        if (v2Format) {
+          // v2.0: Load auto_watch rules
+          const v2Data = parsed as DashboardDataV2;
+          if (v2Data.auto_watch && v2Data.auto_watch.length > 0) {
+            loadRulesV2ToBackend(v2Data.auto_watch);
+          }
+        } else {
+          // v1.0: Load watch_prices rules
+          const watchPrices = (parsed as DashboardDataV1).watch_prices || (parsed as DashboardDataV1).watch_prices_afternoon;
+          if (watchPrices && Object.keys(watchPrices).length > 0) {
+            loadRulesToBackend(watchPrices);
+          }
         }
       }, 100);
     } catch (err) {
@@ -467,8 +677,8 @@ const OperationDashboardPage: React.FC = () => {
   };
 
   const testPriceAlert = async (stockCode: string) => {
-    // Support both watch_prices and watch_prices_afternoon
-    const watchPrices = dashboardData?.watch_prices || dashboardData?.watch_prices_afternoon;
+    const v1Data = dashboardData as DashboardDataV1;
+    const watchPrices = v1Data?.watch_prices || v1Data?.watch_prices_afternoon;
     const watchItem = watchPrices?.[stockCode];
     if (!watchItem) return;
     
@@ -520,11 +730,13 @@ const OperationDashboardPage: React.FC = () => {
     }
   };
 
-  const formatNumber = (num: number) => {
+  const formatNumber = (num: number | undefined | null) => {
+    if (num == null) return '-';
     return num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  const formatPnl = (pnl: number) => {
+  const formatPnl = (pnl: number | undefined | null) => {
+    if (pnl == null) return <span className="text-secondary-text">-</span>;
     const sign = pnl >= 0 ? '+' : '';
     const color = pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400';
     return <span className={color}>{sign}{formatNumber(pnl)}</span>;
@@ -638,7 +850,7 @@ const OperationDashboardPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-foreground">操作指令看板</h1>
           <p className="mt-1 text-sm text-secondary-text">
-            {dashboardData.date}{dashboardData.time ? ` · ${dashboardData.time}` : ''}{dashboardData.generated_at ? ` · 生成于 ${dashboardData.generated_at}` : ''}
+            {!isV2 && (dashboardData as DashboardDataV1).date}{!isV2 && (dashboardData as DashboardDataV1).time ? ` · ${(dashboardData as DashboardDataV1).time}` : ''}{dashboardData.generated_at ? ` · 生成于 ${dashboardData.generated_at}` : ''}
           </p>
         </div>
         <div className="flex gap-3">
@@ -732,7 +944,7 @@ const OperationDashboardPage: React.FC = () => {
             </div>
             <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
               <p className="text-sm text-secondary-text">持仓市值</p>
-              <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.total_market_value)}</p>
+              <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(!isV2 ? (dashboardData as DashboardDataV1).summary!.total_market_value : (dashboardData as DashboardDataV2).summary.stock_value)}</p>
             </div>
             <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
               <p className="text-sm text-secondary-text">浮动盈亏</p>
@@ -749,14 +961,42 @@ const OperationDashboardPage: React.FC = () => {
       </div>
 
       {/* Market Context */}
-      {dashboardData.summary?.market_context && (
+      {isV2 ? (
+        // v2.0 Market Indexes
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Target className="h-5 w-5 text-primary" />
+            市场概况
+          </h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { key: 'shanghai', label: '上证指数', index: (dashboardData as DashboardDataV2).summary?.indexes?.shanghai },
+              { key: 'chi_next50', label: '创业板50', index: (dashboardData as DashboardDataV2).summary?.indexes?.chi_next50 },
+              { key: 'shanghai50', label: '上证50', index: (dashboardData as DashboardDataV2).summary?.indexes?.shanghai50 },
+            ].filter(({ index }) => index).map(({ key, label, index }) => (
+              <div key={key} className="rounded-lg border border-border bg-background p-4">
+                <p className="text-sm font-medium text-foreground">{label}</p>
+                <p className="mt-2 text-xl font-bold text-foreground">{index!.close.toFixed(2)}</p>
+                <p className={cn(
+                  'mt-1 text-sm font-medium',
+                  index!.change_pct >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                )}>
+                  {index!.change_pct >= 0 ? '+' : ''}{index!.change_pct.toFixed(2)}%
+                </p>
+                <p className="mt-1 text-xs text-secondary-text">{index!.trend}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : dashboardData && (dashboardData as DashboardDataV1).summary?.market_context ? (
+        // v1.0 Market Context (legacy)
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
             <Target className="h-5 w-5 text-primary" />
             市场概况
           </h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {Object.entries(dashboardData.summary.market_context).filter(([, index]) => index).map(([key, index]) => {
+            {Object.entries((dashboardData as DashboardDataV1).summary!.market_context).filter(([, index]) => index).map(([key, index]) => {
               if (!index) return null;
               return (
             <div key={key} className="rounded-lg border border-border bg-background p-4">
@@ -780,17 +1020,102 @@ const OperationDashboardPage: React.FC = () => {
             })}
           </div>
         </div>
+      ) : null}
+
+      {/* Orders - v2.0 Unified Orders */}
+      {isV2 && (dashboardData as DashboardDataV2).orders && (dashboardData as DashboardDataV2).orders.length > 0 && (
+        <div className={cn(
+          'rounded-xl border p-6 shadow-sm',
+          'border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-900/20'
+        )}>
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-orange-800 dark:text-orange-300">
+            <AlertCircle className="h-5 w-5" />
+            交易指令 ({(dashboardData as DashboardDataV2).orders.length})
+          </h2>
+          <div className="space-y-3">
+            {(dashboardData as DashboardDataV2).orders
+              .sort((a, b) => a.priority - b.priority) // Sort by priority
+              .map((order) => {
+              const actionKey = `order_${order.id}`;
+              const isCompleted = completedActions.has(actionKey);
+              const isBuy = order.direction === 'buy';
+              
+              // Trigger type mapping
+              const triggerLabel = {
+                'price_above': `价格突破 ¥${order.trigger.value}`,
+                'price_below': `价格跌破 ¥${order.trigger.value}`,
+                'volume_above_and_price_above': `放量突破 ¥${order.trigger.value}`,
+              }[order.trigger.type] || order.trigger.type;
+              
+              // Validity label
+              const validityLabel = order.validity === 'today' ? '今日有效' : '长期有效';
+              
+              return (
+                <div
+                  key={order.id}
+                  className={cn(
+                    'rounded-lg border bg-white p-4 transition-all dark:bg-slate-800',
+                    isCompleted ? 'border-green-300 opacity-60 dark:border-green-700' : 'border-orange-200 dark:border-orange-700'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-700 dark:bg-orange-900 dark:text-orange-300">
+                          P{order.priority}
+                        </span>
+                        <h3 className="font-semibold text-foreground">
+                          {order.stock_name} ({order.stock_code})
+                        </h3>
+                        <span className={cn(
+                          'inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium',
+                          isBuy 
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                        )}>
+                          {isBuy ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+                          {isBuy ? '买入' : '卖出'} {order.quantity}股 @ ¥{order.price}
+                        </span>
+                        <span className="text-xs text-secondary-text">{validityLabel}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-secondary-text">
+                        <span className="font-medium">触发条件:</span> {triggerLabel}
+                      </p>
+                      <p className="mt-2 text-sm text-foreground">{order.reason}</p>
+                    </div>
+                    <button
+                      onClick={() => toggleActionComplete(actionKey, { 
+                        stock_code: order.stock_code, 
+                        stock_name: order.stock_name, 
+                        action: order.direction, 
+                        quantity: order.quantity 
+                      })}
+                      className={cn(
+                        'flex h-8 w-8 items-center justify-center rounded-full border-2 transition-all',
+                        isCompleted
+                          ? 'border-green-500 bg-green-500 text-white'
+                          : 'border-gray-300 hover:border-green-500 dark:border-gray-600'
+                      )}
+                    >
+                      {isCompleted && <CheckCircle2 className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
-      {/* Must Do Actions */}
-      {dashboardData.must_do.length > 0 && (
+      {/* Must Do Actions - v1.0 Legacy */}
+      {!isV2 && (dashboardData as DashboardDataV1).must_do && (dashboardData as DashboardDataV1).must_do.length > 0 && (
         <div className="rounded-xl border border-orange-200 bg-orange-50 p-6 shadow-sm dark:border-orange-800 dark:bg-orange-900/20">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-orange-800 dark:text-orange-300">
             <AlertCircle className="h-5 w-5" />
-            必须执行 ({dashboardData.must_do.length})
+            必须执行 ({(dashboardData as DashboardDataV1).must_do.length})
           </h2>
           <div className="space-y-3">
-            {dashboardData.must_do.map((item, idx) => {
+            {(dashboardData as DashboardDataV1).must_do.map((item: MustDoItem, idx: number) => {
               const actionKey = `must_${idx}`;
               const isCompleted = completedActions.has(actionKey);
               return (
@@ -847,15 +1172,15 @@ const OperationDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Conditional Actions */}
-      {dashboardData.conditional.length > 0 && (
+      {/* Conditional Actions - v1.0 Legacy */}
+      {!isV2 && (dashboardData as DashboardDataV1).conditional && (dashboardData as DashboardDataV1).conditional.length > 0 && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-6 shadow-sm dark:border-blue-800 dark:bg-blue-900/20">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-blue-800 dark:text-blue-300">
             <Clock className="h-5 w-5" />
-            条件单 ({dashboardData.conditional.length})
+            条件单 ({(dashboardData as DashboardDataV1).conditional.length})
           </h2>
           <div className="space-y-3">
-            {dashboardData.conditional.map((item, idx) => {
+            {(dashboardData as DashboardDataV1).conditional.map((item: ConditionalItem, idx: number) => {
               const actionKey = `cond_${idx}`;
               const isCompleted = completedActions.has(actionKey);
               return (
@@ -912,14 +1237,105 @@ const OperationDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Holdings */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
-          <Eye className="h-5 w-5 text-primary" />
-          持仓观察 ({dashboardData.hold.length})
-        </h2>
-        <div className="space-y-3">
-          {dashboardData.hold.map((item, idx) => (
+      {/* Positions - v2.0 Holdings with Action */}
+      {isV2 && (dashboardData as DashboardDataV2).positions && (dashboardData as DashboardDataV2).positions.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Eye className="h-5 w-5 text-primary" />
+            持仓管理 ({(dashboardData as DashboardDataV2).positions.length})
+          </h2>
+          <div className="space-y-3">
+            {(dashboardData as DashboardDataV2).positions.map((pos) => {
+              const actionColor = {
+                'hold': 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+                'add': 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+                'reduce': 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+                'sell': 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+              }[pos.action];
+              
+              const actionLabel = {
+                'hold': '持有',
+                'add': '加仓',
+                'reduce': '减仓',
+                'sell': '清仓',
+              }[pos.action];
+              
+              return (
+                <div key={pos.stock_code} className="rounded-lg border border-border bg-background p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-foreground">
+                          {pos.stock_name} ({pos.stock_code})
+                        </h3>
+                        <span className={cn(
+                          'text-xs font-medium',
+                          pos.day_change_pct >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                        )}>
+                          {pos.day_change_pct >= 0 ? '+' : ''}{pos.day_change_pct.toFixed(2)}%
+                        </span>
+                        <span className={cn(
+                          'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
+                          actionColor
+                        )}>
+                          {actionLabel}
+                        </span>
+                        <span className={cn(
+                          'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
+                          pos.score >= 70 
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                            : pos.score >= 50
+                            ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                        )}>
+                          评分 {pos.score}分
+                        </span>
+                        <span className="text-xs text-secondary-text">{pos.ma_status}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
+                        <div>
+                          <p className="text-xs text-secondary-text">持仓</p>
+                          <p className="font-medium text-foreground">{pos.shares}股</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-secondary-text">成本</p>
+                          <p className="font-medium text-foreground">¥{pos.avg_cost}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-secondary-text">现价</p>
+                          <p className="font-medium text-foreground">¥{pos.last_price}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-secondary-text">盈亏</p>
+                          <p className="font-medium">{formatPnl(pos.unrealized_pnl)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-secondary-text">仓位</p>
+                          <p className="font-medium text-foreground">{pos.weight_pct != null ? pos.weight_pct.toFixed(1) : '-'}%</p>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center gap-4 text-xs text-secondary-text">
+                        <span className="text-red-600 dark:text-red-400">止损 ¥{pos.stop_loss}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-foreground">{pos.note}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Holdings - v1.0 Legacy */}
+      {!isV2 && (dashboardData as DashboardDataV1).hold && (dashboardData as DashboardDataV1).hold.length > 0 && (
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Eye className="h-5 w-5 text-primary" />
+            持仓观察 ({(dashboardData as DashboardDataV1).hold.length})
+          </h2>
+          <div className="space-y-3">
+            {(dashboardData as DashboardDataV1).hold.map((item, idx) => (
             <div key={idx} className="rounded-lg border border-border bg-background p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
@@ -975,10 +1391,183 @@ const OperationDashboardPage: React.FC = () => {
             </div>
           ))}
         </div>
-      </div>
+        </div>
+      )}
 
-      {/* Watch Prices */}
-      {(dashboardData.watch_prices || dashboardData.watch_prices_afternoon) && (
+      {/* Auto Watch - v2.0 New Feature */}
+      {isV2 && (dashboardData as DashboardDataV2).auto_watch && (dashboardData as DashboardDataV2).auto_watch!.length > 0 && (
+        <div className={cn(
+          'rounded-xl border p-6 shadow-sm',
+          'border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-900/20'
+        )}>
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-purple-800 dark:text-purple-300">
+              <Bell className="h-5 w-5" />
+              自动盯盘 ({(dashboardData as DashboardDataV2).auto_watch!.length})
+            </h2>
+            {(dashboardData as DashboardDataV2).watch_rules && (
+              <span className="text-xs text-purple-600 dark:text-purple-400">
+                扫描间隔: {(dashboardData as DashboardDataV2).watch_rules!.scan_interval_seconds}秒
+              </span>
+            )}
+          </div>
+          <div className="space-y-3">
+            {(dashboardData as DashboardDataV2).auto_watch!
+              .sort((a, b) => a.priority - b.priority)
+              .map((watch) => {
+              const isNotifyOnly = watch.execution.mode === 'notify_only';
+              const isAutoLimit = watch.execution.mode === 'auto_limit';
+              
+              // Trigger type mapping
+              const triggerLabel = {
+                'price_drop_to': `价格跌至 ¥${watch.trigger.target}`,
+                'price_rise_to': `价格上涨至 ¥${watch.trigger.target}`,
+                'volume_surge_and_price_break': `放量突破 ¥${watch.trigger.price_above}`,
+                'price_alert': `价格提醒 ¥${watch.trigger.target}`,
+              }[watch.trigger.type] || watch.trigger.type;
+              
+              // Execution mode label
+              const modeLabel = {
+                'auto_limit': '自动限价',
+                'auto_market': '自动市价',
+                'notify_only': '仅通知',
+              }[watch.execution.mode];
+              
+              // Direction label
+              const directionLabel = {
+                'buy': '买入',
+                'sell': '卖出',
+                'none': '仅监控',
+              }[watch.direction];
+              
+              return (
+                <div
+                  key={watch.id}
+                  className={cn(
+                    'rounded-lg border bg-white p-4 transition-all dark:bg-slate-800',
+                    isNotifyOnly ? 'border-blue-200 dark:border-blue-700' : 'border-purple-200 dark:border-purple-700'
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700 dark:bg-purple-900 dark:text-purple-300">
+                          P{watch.priority}
+                        </span>
+                        <h3 className="font-semibold text-foreground">
+                          {watch.stock_name} ({watch.stock_code})
+                        </h3>
+                        <span className={cn(
+                          'inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium',
+                          watch.direction === 'buy' 
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                            : watch.direction === 'sell'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                        )}>
+                          {directionLabel}
+                          {watch.quantity > 0 && ` ${watch.quantity}股`}
+                        </span>
+                        <span className={cn(
+                          'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
+                          isNotifyOnly
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                            : isAutoLimit
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300'
+                            : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
+                        )}>
+                          {modeLabel}
+                        </span>
+                        <span className="text-xs text-secondary-text">
+                          {watch.execution.validity === 'today' ? '今日有效' : '长期有效'}
+                        </span>
+                      </div>
+                      
+                      {/* Trigger */}
+                      <p className="mt-2 text-sm text-secondary-text">
+                        <span className="font-medium">触发条件:</span> {triggerLabel}
+                      </p>
+                      
+                      {/* Condition (if exists) */}
+                      {(watch.condition.reject_if || watch.condition.cancel_if) && (
+                        <div className="mt-2 space-y-1 text-xs text-secondary-text">
+                          {watch.condition.reject_if && Object.keys(watch.condition.reject_if).length > 0 && (
+                            <p>
+                              <span className="font-medium text-orange-600 dark:text-orange-400">拒绝条件:</span>{' '}
+                              {Object.entries(watch.condition.reject_if).map(([key, value]) => (
+                                <span key={key} className="mr-2">
+                                  {key === 'volume_ratio_below' && `量比低于 ${value}`}
+                                  {key === 'market_depth_sell_wall_gte' && `卖盘挂单 >= ${value}`}
+                                  {key === 'price_drop_to' && `价格跌破 ${value}`}
+                                </span>
+                              ))}
+                            </p>
+                          )}
+                          {watch.condition.cancel_if && Object.keys(watch.condition.cancel_if).length > 0 && (
+                            <p>
+                              <span className="font-medium text-red-600 dark:text-red-400">撤销条件:</span>{' '}
+                              {Object.entries(watch.condition.cancel_if).map(([key, value]) => (
+                                <span key={key} className="mr-2">
+                                  {key === 'price_gap_open_above' && `跳空高开超过 ${value}`}
+                                  {key === 'time_passed' && `时间超过 ${value}`}
+                                </span>
+                              ))}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Execution details */}
+                      {!isNotifyOnly && (
+                        <div className="mt-2 text-xs text-secondary-text">
+                          <span className="font-medium">执行细节:</span>{' '}
+                          {isAutoLimit && watch.execution.limit_price_offset && (
+                            <span>限价偏移 {watch.execution.limit_price_offset > 0 ? '+' : ''}{watch.execution.limit_price_offset}</span>
+                          )}
+                          {watch.execution.retry_on_fail && (
+                            <span className="ml-2">失败重试 (最多{watch.execution.max_retries}次)</span>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Reason */}
+                      <p className="mt-2 text-sm text-foreground">{watch.reason}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          {/* Watch Rules Summary */}
+          {(dashboardData as DashboardDataV2).watch_rules && (
+            <div className="mt-4 rounded-lg border border-purple-200 bg-purple-100 p-3 dark:border-purple-700 dark:bg-purple-900/30">
+              <p className="text-xs font-medium text-purple-800 dark:text-purple-300">全局监控规则：</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-purple-700 dark:text-purple-400 sm:grid-cols-4">
+                <div>
+                  <span className="font-medium">执行通知：</span>
+                  {(dashboardData as DashboardDataV2).watch_rules!.notify_on_execute ? '✅ 开启' : '❌ 关闭'}
+                </div>
+                <div>
+                  <span className="font-medium">拒绝通知：</span>
+                  {(dashboardData as DashboardDataV2).watch_rules!.notify_on_reject ? '✅ 开启' : '❌ 关闭'}
+                </div>
+                <div>
+                  <span className="font-medium">撤销通知：</span>
+                  {(dashboardData as DashboardDataV2).watch_rules!.notify_on_cancel ? '✅ 开启' : '❌ 关闭'}
+                </div>
+                <div>
+                  <span className="font-medium">最大并发：</span>
+                  {(dashboardData as DashboardDataV2).watch_rules!.fail_safe?.max_concurrent_watches || 10}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Watch Prices - v1.0 Legacy */}
+      {!isV2 && ((dashboardData as DashboardDataV1).watch_prices || (dashboardData as DashboardDataV1).watch_prices_afternoon) && (
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
             <Target className="h-5 w-5 text-primary" />
@@ -998,7 +1587,7 @@ const OperationDashboardPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(dashboardData.watch_prices || dashboardData.watch_prices_afternoon || {}).map(([code, item]) => {
+                {Object.entries((dashboardData as DashboardDataV1).watch_prices || (dashboardData as DashboardDataV1).watch_prices_afternoon || {}).map(([code, item]) => {
                 const status = pushStatus[code];
                 return (
                   <tr key={code} className="border-b border-border/50 hover:bg-hover/50">
@@ -1037,7 +1626,7 @@ const OperationDashboardPage: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </div>
+        </div>
       )}
 
       {/* Execution Log Panel */}
@@ -1062,7 +1651,7 @@ const OperationDashboardPage: React.FC = () => {
           <div className="rounded-lg border border-dashed border-green-300 bg-white p-8 text-center dark:border-green-700 dark:bg-slate-800">
             <Clock className="mx-auto mb-2 h-8 w-8 text-green-400" />
             <p className="text-sm text-secondary-text">🕐 今日暂无执行记录</p>
-            <p className="mt-1 text-xs text-secondary-text">勾选上面的操作后，执行记录将在此显示</p>
+            <p className="mt-1 text-xs text-secondary-text">{isV2 ? '执行日志已从 JSON 加载' : '勾选上面的操作后，执行记录将在此显示'}</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -1078,7 +1667,9 @@ const OperationDashboardPage: React.FC = () => {
                       {log.action === 'sell' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />}
                       {log.action === 'sell' ? '卖出' : '买入'}
                     </span>
-                    <span className="text-sm text-foreground">{log.quantity}股</span>
+                    {typeof log.quantity === 'number' && log.quantity > 0 && (
+                      <span className="text-sm text-foreground">{log.quantity}股</span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-secondary-text">
@@ -1086,6 +1677,9 @@ const OperationDashboardPage: React.FC = () => {
                     </p>
                     {log.executed_price && (
                       <p className="text-xs text-secondary-text">💰 执行价格: ¥{log.executed_price}</p>
+                    )}
+                    {log.note && (
+                      <p className="text-xs text-secondary-text mt-1">📝 {log.note}</p>
                     )}
                   </div>
                 </div>
@@ -1099,15 +1693,15 @@ const OperationDashboardPage: React.FC = () => {
         )}
       </div>
 
-      {/* Execution Notes */}
-      {dashboardData.execution_notes && dashboardData.execution_notes.length > 0 && (
+      {/* Execution Notes - v1.0 Legacy */}
+      {!isV2 && (dashboardData as DashboardDataV1).execution_notes && (dashboardData as DashboardDataV1).execution_notes!.length > 0 && (
         <div className="rounded-xl border border-purple-200 bg-purple-50 p-6 shadow-sm dark:border-purple-800 dark:bg-purple-900/20">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-purple-800 dark:text-purple-300">
             <FileJson className="h-5 w-5" />
             执行说明
           </h2>
           <ul className="space-y-2">
-            {dashboardData.execution_notes.map((note, idx) => (
+            {(dashboardData as DashboardDataV1).execution_notes!.map((note: string, idx: number) => (
               <li key={idx} className="flex items-start gap-2 text-sm text-purple-800 dark:text-purple-300">
                 <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-purple-500"></span>
                 {note}

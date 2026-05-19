@@ -886,8 +886,13 @@ async def test_feishu_alert(request: TestAlertRequest):
 # ========================
 
 class MonitorLoadRulesRequest(BaseModel):
-    """Load watch rules from dashboard data."""
+    """Load watch rules from dashboard data (v1.0 format)."""
     watch_prices: Dict[str, Dict]
+
+
+class MonitorLoadRulesV2Request(BaseModel):
+    """Load watch rules from auto_watch array (v2.0 format)."""
+    auto_watch: List[Dict]
 
 
 class MonitorStatusResponse(BaseModel):
@@ -931,14 +936,27 @@ async def disable_monitor():
 
 @router.post("/monitor/load-rules")
 async def load_monitor_rules(request: MonitorLoadRulesRequest):
-    """Load watch rules from dashboard data."""
+    """Load watch rules from dashboard data (v1.0 format)."""
     from src.services.price_monitor import get_price_monitor
     monitor = get_price_monitor()
     monitor.load_from_dashboard(request.watch_prices)
     return {
         "success": True,
-        "message": f"已加载 {len(request.watch_prices)} 条预警规则",
+        "message": f"已加载 {len(request.watch_prices)} 条预警规则（v1.0 格式）",
         "rule_count": len(request.watch_prices),
+    }
+
+
+@router.post("/monitor/load-rules-v2")
+async def load_monitor_rules_v2(request: MonitorLoadRulesV2Request):
+    """Load watch rules from auto_watch array (v2.0 format)."""
+    from src.services.price_monitor import get_price_monitor
+    monitor = get_price_monitor()
+    monitor.load_from_auto_watch(request.auto_watch)
+    return {
+        "success": True,
+        "message": f"已加载 {len(request.auto_watch)} 条预警规则（v2.0 格式）",
+        "rule_count": len(request.auto_watch),
     }
 
 

@@ -23,15 +23,28 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WatchRule:
-    """价格预警规则"""
+    """价格预警规则（支持 v1.0 和 v2.0）"""
     stock_code: str
     stock_name: str
-    watch_price: float
-    operation: str = "关注"
+    watch_price: float = 0.0  # v1.0 预警价
+    operation: str = "关注"  # v1.0 操作说明
     note: str = ""
     triggered: bool = False  # 是否已触发
     triggered_at: Optional[datetime] = None
     pushed: bool = False  # 是否已推送
+    
+    # v2.0 新字段
+    rule_id: Optional[str] = None  # 规则 ID（如 W001）
+    direction: Optional[str] = None  # buy/sell/none
+    quantity: int = 0
+    trigger_type: Optional[str] = None  # price_drop_to, price_rise_to, volume_surge_and_price_break, price_alert
+    trigger_params: Dict = field(default_factory=dict)  # 触发参数
+    condition_reject: Optional[Dict] = None  # 拒绝条件
+    condition_cancel: Optional[Dict] = None  # 撤销条件
+    execution_mode: Optional[str] = None  # auto_limit, auto_market, notify_only
+    execution_params: Dict = field(default_factory=dict)  # 执行参数
+    priority: int = 3
+    validity: str = "until_canceled"  # today / until_canceled
 
 
 @dataclass
@@ -166,27 +179,14 @@ class PriceMonitor:
                     current_price = float(quote.price)
                     
                     # 判断是否达到预警价
-                    # 通过关键词判断操作类型
                     is_triggered = False
                     
-                    # 卖出/减仓操作：当前价 >= 预警价（涨到目标价卖出）
-                    if "卖出" in rule.operation or "减仓" in rule.operation or rule.operation == "sell":
-                        is_triggered = current_price >= rule.watch_price
-                    # 买入/补仓操作：当前价 <= 预警价（跌到目标价买入）
-                    elif "买入" in rule.operation or "补仓" in rule.operation or rule.operation == "buy":
-                        is_triggered = current_price <= rule.watch_price
-                    # 跌破止损操作：当前价 <= 预警价（跌破支撑位）
-                    elif "跌破" in rule.operation or "止损" in rule.operation:
-                        is_triggered = current_price <= rule.watch_price
-                    # 反弹到某个价格：当前价 >= 预警价
-                    elif "反弹" in rule.operation or "关注" in rule.operation:
-                        is_triggered = current_price >= rule.watch_price
+                    # v2.0 结构化触发条件
+                    if rule.trigger_type:
+                        is_triggered = self._check_v2_trigger(rule, current_price, quote)
+                    # v1.0 关键词匹配触发
                     else:
-                        # 如果没有明确的操作关键词，默认不触发（避免误触发）
-                        logger.debug(
-                            f"[PriceMonitor] {stock_code} 预警规则缺少操作关键词，跳过: {rule.operation}"
-                        )
-                        continue
+                        is_triggered = self._check_v1_trigger(rule, current_price)
 
                     if is_triggered:
                         rule.triggered = True
@@ -214,19 +214,137 @@ class PriceMonitor:
 
         return triggered_rules
 
+    def _check_v1_trigger(self, rule: WatchRule, current_price: float) -> bool:
+        """v1.0 关键词匹配触发逻辑"""
+        # 卖出/减仓操作：当前价 >= 预警价（涨到目标价卖出）
+        if "卖出" in rule.operation or "减仓" in rule.operation or rule.operation == "sell":
+            return current_price >= rule.watch_price
+        # 买入/补仓操作：当前价 <= 预警价（跌到目标价买入）
+        elif "买入" in rule.operation or "补仓" in rule.operation or rule.operation == "buy":
+            return current_price <= rule.watch_price
+        # 跌破止损操作：当前价 <= 预警价（跌破支撑位）
+        elif "跌破" in rule.operation or "止损" in rule.operation:
+            return current_price <= rule.watch_price
+        # 反弹到某个价格：当前价 >= 预警价
+        elif "反弹" in rule.operation or "关注" in rule.operation:
+            return current_price >= rule.watch_price
+        else:
+            # 如果没有明确的操作关键词，默认不触发（避免误触发）
+            logger.debug(
+                f"[PriceMonitor] {rule.stock_code} 预警规则缺少操作关键词，跳过: {rule.operation}"
+            )
+            return False
+
+    def _check_v2_trigger(self, rule: WatchRule, current_price: float, quote) -> bool:
+        """v2.0 结构化触发条件判断"""
+        trigger_type = rule.trigger_type
+        trigger_params = rule.trigger_params
+        
+        # 先检查拒绝条件
+        if rule.condition_reject:
+            reject_triggered = self._check_reject_condition(rule.condition_reject, quote)
+            if reject_triggered:
+                logger.debug(f"[PriceMonitor] {rule.stock_code} 触发拒绝条件，跳过检查")
+                return False
+        
+        # 根据不同的触发类型判断
+        if trigger_type == "price_drop_to":
+            # 价格跌至目标价
+            target = trigger_params.get("target", rule.watch_price)
+            return current_price <= target
+            
+        elif trigger_type == "price_rise_to":
+            # 价格上涨至目标价
+            target = trigger_params.get("target", rule.watch_price)
+            return current_price >= target
+            
+        elif trigger_type == "price_alert":
+            # 价格提醒（只通知，不执行）
+            target = trigger_params.get("target", rule.watch_price)
+            return current_price >= target or current_price <= target
+            
+        elif trigger_type == "volume_surge_and_price_break":
+            # 放量突破（需要量比和价格同时满足）
+            volume_ratio_threshold = trigger_params.get("volume_ratio_threshold", 1.5)
+            price_above = trigger_params.get("price_above", rule.watch_price)
+            
+            # 获取量比（如果 quote 有 volume_ratio 属性）
+            volume_ratio = getattr(quote, 'volume_ratio', None)
+            if volume_ratio is None:
+                logger.debug(f"[PriceMonitor] {rule.stock_code} 无法获取量比，跳过放量检查")
+                return False
+            
+            return volume_ratio >= volume_ratio_threshold and current_price >= price_above
+        
+        else:
+            logger.debug(f"[PriceMonitor] {rule.stock_code} 未知的触发类型: {trigger_type}")
+            return False
+
+    def _check_reject_condition(self, reject_if: Dict, quote) -> bool:
+        """检查拒绝条件（满足任一条件则拒绝触发）"""
+        # 量比低于阈值
+        volume_ratio_below = reject_if.get("volume_ratio_below")
+        if volume_ratio_below is not None:
+            volume_ratio = getattr(quote, 'volume_ratio', None)
+            if volume_ratio is not None and volume_ratio < volume_ratio_below:
+                logger.debug(f"[PriceMonitor] 拒绝条件触发: 量比 {volume_ratio} < {volume_ratio_below}")
+                return True
+        
+        # 卖盘挂单 >= 阈值（暂未实现，需要五档行情数据）
+        market_depth_sell_wall = reject_if.get("market_depth_sell_wall_gte")
+        if market_depth_sell_wall is not None:
+            logger.debug(f"[PriceMonitor] 拒绝条件: 卖盘挂单检查暂未实现")
+            # 暂时返回 False，不拒绝
+        
+        # 价格跌破
+        price_drop_to = reject_if.get("price_drop_to")
+        if price_drop_to is not None:
+            current_price = getattr(quote, 'price', 0)
+            if current_price <= price_drop_to:
+                logger.debug(f"[PriceMonitor] 拒绝条件触发: 价格 {current_price} <= {price_drop_to}")
+                return True
+        
+        return False
+
     def _push_alert(self, rule: WatchRule, current_price: float) -> None:
         """推送预警消息到飞书"""
-        operation_type = "卖出" if "卖出" in rule.operation else "买入" if "买入" in rule.operation else "关注"
+        # 判断操作类型
+        if rule.trigger_type:
+            # v2.0 结构化操作
+            if rule.direction == "buy":
+                operation_type = "买入"
+            elif rule.direction == "sell":
+                operation_type = "卖出"
+            else:
+                operation_type = "监控"
+        else:
+            # v1.0 关键词匹配
+            operation_type = "卖出" if "卖出" in rule.operation else "买入" if "买入" in rule.operation else "关注"
         
+        # 构建推送消息
         alert_message = (
-            f"🔔 价格预警 | {rule.stock_name}\n\n"
+            f" 价格预警 | {rule.stock_name}\n\n"
             f"股票：{rule.stock_name}（{rule.stock_code}）\n"
             f"当前价：¥{current_price:.2f}\n"
             f"预警价：¥{rule.watch_price:.2f}\n"
-            f"建议操作：{operation_type}\n"
-            f"说明：{rule.note}\n\n"
-            f"—— 自动监盘系统"
+            f"建议操作：{operation_type}"
         )
+        
+        # v2.0 附加信息
+        if rule.trigger_type:
+            if rule.quantity > 0:
+                alert_message += f"\n数量：{rule.quantity}股"
+            if rule.execution_mode:
+                mode_name = {
+                    "auto_limit": "自动限价",
+                    "auto_market": "自动市价",
+                    "notify_only": "仅通知"
+                }.get(rule.execution_mode, rule.execution_mode)
+                alert_message += f"\n执行模式：{mode_name}"
+            if rule.priority:
+                alert_message += f"\n优先级：P{rule.priority}"
+        
+        alert_message += f"\n说明：{rule.note}\n\n—— 自动监盘系统"
 
         try:
             success = self.feishu_sender.send_to_feishu(alert_message)
@@ -243,7 +361,7 @@ class PriceMonitor:
 
     def load_from_dashboard(self, watch_prices: Dict) -> None:
         """
-        从操作指令看板的预警数据加载规则
+        从操作指令看板的预警数据加载规则（v1.0 格式）
         
         Args:
             watch_prices: 格式如 { "002544": { "name": "普天科技", "operation": "卖出500股", "watch_price": 25.80, "note": "..." } }
@@ -260,7 +378,62 @@ class PriceMonitor:
             )
             self.add_rule(rule)
         
-        logger.info(f"[PriceMonitor] 从看板加载 {len(watch_prices)} 条预警规则")
+        logger.info(f"[PriceMonitor] 从看板加载 {len(watch_prices)} 条预警规则（v1.0 格式）")
+
+    def load_from_auto_watch(self, auto_watch_list: List[Dict]) -> None:
+        """
+        从 v2.0 auto_watch 数组加载规则
+        
+        Args:
+            auto_watch_list: v2.0 格式的 auto_watch 数组
+        """
+        self.clear_rules()
+        
+        for item in auto_watch_list:
+            trigger = item.get("trigger", {})
+            condition = item.get("condition", {})
+            execution = item.get("execution", {})
+            
+            # 提取目标价格
+            watch_price = 0.0
+            if trigger.get("target") is not None:
+                watch_price = float(trigger["target"])
+            elif trigger.get("value") is not None:
+                watch_price = float(trigger["value"])
+            elif trigger.get("price_above") is not None:
+                watch_price = float(trigger["price_above"])
+            
+            # 构建操作说明
+            direction = item.get("direction", "none")
+            if direction == "buy":
+                operation = "买入"
+            elif direction == "sell":
+                operation = "卖出"
+            else:
+                operation = "监控"
+            
+            rule = WatchRule(
+                stock_code=item["stock_code"],
+                stock_name=item["stock_name"],
+                watch_price=watch_price,
+                operation=operation,
+                note=item.get("reason", ""),
+                # v2.0 字段
+                rule_id=item.get("id"),
+                direction=direction,
+                quantity=item.get("quantity", 0),
+                trigger_type=trigger.get("type"),
+                trigger_params=trigger,
+                condition_reject=condition.get("reject_if"),
+                condition_cancel=condition.get("cancel_if"),
+                execution_mode=execution.get("mode"),
+                execution_params=execution,
+                priority=item.get("priority", 3),
+                validity=execution.get("validity", "until_canceled"),
+            )
+            self.add_rule(rule)
+        
+        logger.info(f"[PriceMonitor] 从 auto_watch 加载 {len(auto_watch_list)} 条预警规则（v2.0 格式）")
 
 
 # 全局单例
