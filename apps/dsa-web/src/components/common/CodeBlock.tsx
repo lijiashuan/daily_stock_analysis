@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { cn } from '../utils/cn';
+import { cn } from '../../utils/cn';
 
 interface CodeBlockProps {
   className?: string;
@@ -17,26 +17,27 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ className, children }) => 
     if (Array.isArray(children)) {
       return children.map(child => {
         if (typeof child === 'string') return child;
-        if (React.isValidElement(child) && child.props?.children) {
-          return getCodeTextFromElement(child);
+        if (React.isValidElement(child)) {
+          return getCodeTextFromElement(child as React.ReactElement);
         }
         return '';
       }).join('');
     }
     if (React.isValidElement(children)) {
-      return getCodeTextFromElement(children);
+      return getCodeTextFromElement(children as React.ReactElement);
     }
     return '';
   };
 
   const getCodeTextFromElement = (element: React.ReactElement): string => {
-    if (typeof element.props?.children === 'string') {
-      return element.props.children;
+    const props = element.props as { children?: React.ReactNode };
+    if (typeof props?.children === 'string') {
+      return props.children;
     }
-    if (Array.isArray(element.props?.children)) {
-      return element.props.children.map((child: any) => {
+    if (Array.isArray(props?.children)) {
+      return props.children.map((child: any) => {
         if (typeof child === 'string') return child;
-        if (React.isValidElement(child)) return getCodeTextFromElement(child);
+        if (React.isValidElement(child)) return getCodeTextFromElement(child as React.ReactElement);
         return '';
       }).join('');
     }
