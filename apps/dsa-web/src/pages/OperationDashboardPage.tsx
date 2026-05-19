@@ -3,11 +3,18 @@ import { AlertCircle, ArrowDown, ArrowUp, Bell, CheckCircle2, Clock, Eye, FileJs
 import { cn } from '../utils/cn';
 
 // Types
+interface MarketIndex {
+  close: number;
+  change_pct: number;
+  note: string;
+}
+
 interface MarketContext {
-  shanghai_composite: { close: number; change_pct: number; note: string };
-  shenzhen_component: { close: number; change_pct: number; note: string };
-  chi_next_50: { close: number; change_pct: number; note: string };
-  shanghai_50: { close: number; change_pct: number; note: string };
+  shanghai_composite?: MarketIndex;
+  shenzhen_component?: MarketIndex;
+  chi_next_50?: MarketIndex;
+  shanghai_50?: MarketIndex;
+  [key: string]: MarketIndex | undefined;
 }
 
 interface MustDoItem {
@@ -40,6 +47,7 @@ interface HoldItem {
   shares: number;
   avg_cost: number;
   current_price: number;
+  change_pct?: number;
   unrealized_pnl: number;
   weight_pct: number;
   trend_score: number;
@@ -57,9 +65,13 @@ interface WatchPriceItem {
 
 interface DashboardData {
   dashboard_version: string;
-  generated_at: string;
+  generated_at?: string;
   date: string;
-  summary: {
+  time?: string;
+  updated_holdings?: {
+    note: string;
+  };
+  summary?: {
     total_assets: number;
     cash: number;
     cash_ratio_pct: number;
@@ -70,8 +82,15 @@ interface DashboardData {
   must_do: MustDoItem[];
   conditional: ConditionalItem[];
   hold: HoldItem[];
-  watch_prices: Record<string, WatchPriceItem>;
-  execution_notes: string[];
+  watch_prices?: Record<string, WatchPriceItem>;
+  watch_prices_afternoon?: Record<string, WatchPriceItem>;
+  overall_assessment?: {
+    today_performance?: string;
+    major_risk?: string;
+    cash_remaining?: string;
+    afternoon_summary?: string;
+  };
+  execution_notes?: string[];
 }
 
 interface ExecutionLog {
@@ -160,19 +179,22 @@ const OperationDashboardPage: React.FC = () => {
 
   // Load rules to backend when dashboard data changes
   useEffect(() => {
-    if (dashboardData?.watch_prices && Object.keys(dashboardData.watch_prices).length > 0) {
-      loadRulesToBackend();
+    // Support both watch_prices and watch_prices_afternoon
+    const watchPrices = dashboardData?.watch_prices || dashboardData?.watch_prices_afternoon;
+    if (watchPrices && Object.keys(watchPrices).length > 0) {
+      loadRulesToBackend(watchPrices);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardData?.watch_prices]);
+  }, [dashboardData?.watch_prices, dashboardData?.watch_prices_afternoon]);
 
-  const loadRulesToBackend = async () => {
-    if (!dashboardData?.watch_prices) return;
+  const loadRulesToBackend = async (watchPrices?: Record<string, WatchPriceItem>) => {
+    const prices = watchPrices || dashboardData?.watch_prices || dashboardData?.watch_prices_afternoon;
+    if (!prices) return;
     try {
       await fetch('/api/v1/agent/monitor/load-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ watch_prices: dashboardData.watch_prices }),
+        body: JSON.stringify({ watch_prices: prices }),
       });
       loadMonitorStatus();
     } catch (err) {
@@ -380,8 +402,9 @@ const OperationDashboardPage: React.FC = () => {
       showToast('success', '数据解析成功！');
       // Load rules to backend after parsing
       setTimeout(() => {
-        if (parsed.watch_prices && Object.keys(parsed.watch_prices).length > 0) {
-          loadRulesToBackend();
+        const watchPrices = parsed.watch_prices || parsed.watch_prices_afternoon;
+        if (watchPrices && Object.keys(watchPrices).length > 0) {
+          loadRulesToBackend(watchPrices);
         }
       }, 100);
     } catch (err) {
@@ -444,7 +467,9 @@ const OperationDashboardPage: React.FC = () => {
   };
 
   const testPriceAlert = async (stockCode: string) => {
-    const watchItem = dashboardData?.watch_prices[stockCode];
+    // Support both watch_prices and watch_prices_afternoon
+    const watchPrices = dashboardData?.watch_prices || dashboardData?.watch_prices_afternoon;
+    const watchItem = watchPrices?.[stockCode];
     if (!watchItem) return;
     
     setSendingAlert(prev => new Set(prev).add(stockCode));
@@ -613,7 +638,7 @@ const OperationDashboardPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-foreground">操作指令看板</h1>
           <p className="mt-1 text-sm text-secondary-text">
-            {dashboardData.date} · 生成于 {dashboardData.generated_at}
+            {dashboardData.date}{dashboardData.time ? ` · ${dashboardData.time}` : ''}{dashboardData.generated_at ? ` · 生成于 ${dashboardData.generated_at}` : ''}
           </p>
         </div>
         <div className="flex gap-3">
@@ -694,39 +719,53 @@ const OperationDashboardPage: React.FC = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <p className="text-sm text-secondary-text">总资产</p>
-          <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.total_assets)}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <p className="text-sm text-secondary-text">可用现金</p>
-          <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.cash)}</p>
-          <p className="mt-1 text-xs text-secondary-text">占比 {dashboardData.summary.cash_ratio_pct}%</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <p className="text-sm text-secondary-text">持仓市值</p>
-          <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.total_market_value)}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
-          <p className="text-sm text-secondary-text">浮动盈亏</p>
-          <p className="mt-2 text-2xl font-bold">{formatPnl(dashboardData.summary.unrealized_pnl)}</p>
-        </div>
+        {dashboardData.summary ? (
+          <>
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+              <p className="text-sm text-secondary-text">总资产</p>
+              <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.total_assets)}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+              <p className="text-sm text-secondary-text">可用现金</p>
+              <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.cash)}</p>
+              <p className="mt-1 text-xs text-secondary-text">占比 {dashboardData.summary.cash_ratio_pct}%</p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+              <p className="text-sm text-secondary-text">持仓市值</p>
+              <p className="mt-2 text-2xl font-bold text-foreground">¥{formatNumber(dashboardData.summary.total_market_value)}</p>
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+              <p className="text-sm text-secondary-text">浮动盈亏</p>
+              <p className="mt-2 text-2xl font-bold">{formatPnl(dashboardData.summary.unrealized_pnl)}</p>
+            </div>
+          </>
+        ) : (
+          <div className="col-span-full rounded-xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-800 dark:bg-blue-900/20">
+            <p className="text-sm text-blue-800 dark:text-blue-300">
+              午盘更新模式：仅持仓和预警信息，资产数据请查看完整看板。
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Market Context */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
-          <Target className="h-5 w-5 text-primary" />
-          市场概况
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Object.entries(dashboardData.summary.market_context).map(([key, index]) => (
+      {dashboardData.summary?.market_context && (
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Target className="h-5 w-5 text-primary" />
+            市场概况
+          </h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {Object.entries(dashboardData.summary.market_context).filter(([, index]) => index).map(([key, index]) => {
+              if (!index) return null;
+              return (
             <div key={key} className="rounded-lg border border-border bg-background p-4">
               <p className="text-sm font-medium text-foreground">
                 {key === 'shanghai_composite' && '上证指数'}
                 {key === 'shenzhen_component' && '深证成指'}
                 {key === 'chi_next_50' && '创业板50'}
                 {key === 'shanghai_50' && '上证50'}
+                {!['shanghai_composite', 'shenzhen_component', 'chi_next_50', 'shanghai_50'].includes(key) && key}
               </p>
               <p className="mt-2 text-xl font-bold text-foreground">{index.close.toFixed(2)}</p>
               <p className={cn(
@@ -737,9 +776,11 @@ const OperationDashboardPage: React.FC = () => {
               </p>
               <p className="mt-1 text-xs text-secondary-text">{index.note}</p>
             </div>
-          ))}
+          );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Must Do Actions */}
       {dashboardData.must_do.length > 0 && (
@@ -886,6 +927,14 @@ const OperationDashboardPage: React.FC = () => {
                     <h3 className="font-semibold text-foreground">
                       {item.stock_name} ({item.stock_code})
                     </h3>
+                    {typeof item.change_pct === 'number' && (
+                      <span className={cn(
+                        'text-xs font-medium',
+                        item.change_pct >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                      )}>
+                        {item.change_pct >= 0 ? '+' : ''}{item.change_pct.toFixed(2)}%
+                      </span>
+                    )}
                     <span className={cn(
                       'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium',
                       item.trend_score >= 70 
@@ -929,26 +978,27 @@ const OperationDashboardPage: React.FC = () => {
       </div>
 
       {/* Watch Prices */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
-          <Target className="h-5 w-5 text-primary" />
-          价格预警
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">股票代码</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">名称</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">操作</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">预警价</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">说明</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">推送状态</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary-text">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(dashboardData.watch_prices).map(([code, item]) => {
+      {(dashboardData.watch_prices || dashboardData.watch_prices_afternoon) && (
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-foreground">
+            <Target className="h-5 w-5 text-primary" />
+            价格预警
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">股票代码</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">名称</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">操作</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">预警价</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">说明</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">推送状态</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary-text">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(dashboardData.watch_prices || dashboardData.watch_prices_afternoon || {}).map(([code, item]) => {
                 const status = pushStatus[code];
                 return (
                   <tr key={code} className="border-b border-border/50 hover:bg-hover/50">
@@ -988,6 +1038,7 @@ const OperationDashboardPage: React.FC = () => {
           </table>
         </div>
       </div>
+      )}
 
       {/* Execution Log Panel */}
       <div className="rounded-xl border border-green-200 bg-green-50 p-6 shadow-sm dark:border-green-800 dark:bg-green-900/20">
@@ -1049,20 +1100,22 @@ const OperationDashboardPage: React.FC = () => {
       </div>
 
       {/* Execution Notes */}
-      <div className="rounded-xl border border-purple-200 bg-purple-50 p-6 shadow-sm dark:border-purple-800 dark:bg-purple-900/20">
-        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-purple-800 dark:text-purple-300">
-          <FileJson className="h-5 w-5" />
-          执行说明
-        </h2>
-        <ul className="space-y-2">
-          {dashboardData.execution_notes.map((note, idx) => (
-            <li key={idx} className="flex items-start gap-2 text-sm text-purple-800 dark:text-purple-300">
-              <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-purple-500"></span>
-              {note}
-            </li>
-          ))}
-        </ul>
-      </div>
+      {dashboardData.execution_notes && dashboardData.execution_notes.length > 0 && (
+        <div className="rounded-xl border border-purple-200 bg-purple-50 p-6 shadow-sm dark:border-purple-800 dark:bg-purple-900/20">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-purple-800 dark:text-purple-300">
+            <FileJson className="h-5 w-5" />
+            执行说明
+          </h2>
+          <ul className="space-y-2">
+            {dashboardData.execution_notes.map((note, idx) => (
+              <li key={idx} className="flex items-start gap-2 text-sm text-purple-800 dark:text-purple-300">
+                <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-purple-500"></span>
+                {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };

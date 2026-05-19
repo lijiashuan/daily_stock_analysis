@@ -598,6 +598,20 @@ class PortfolioFxRate(Base):
     )
 
 
+class ConversationSessionMeta(Base):
+    """
+    Agent 对话会话元数据表（存储自定义标题等会话级信息）
+    """
+    __tablename__ = 'conversation_session_meta'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(100), unique=True, index=True, nullable=False)
+    custom_title = Column(String(200), nullable=True)  # 用户自定义标题
+    auto_title = Column(String(200), nullable=True)  # 系统自动生成的标题
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
 class ConversationMessage(Base):
     """
     Agent 对话历史记录表
@@ -2106,19 +2120,32 @@ class DatabaseManager:
             results = []
             for row in rows:
                 sid = row.session_id
-                # 取该会话第一条 user 消息作为标题
-                first_user_msg = session.execute(
-                    select(ConversationMessage.content)
-                    .where(
-                        and_(
-                            ConversationMessage.session_id == sid,
-                            ConversationMessage.role == "user",
+                # 优先使用自定义标题，如果没有则使用自动生成的标题
+                custom_title = None
+                meta = session.execute(
+                    select(ConversationSessionMeta.custom_title)
+                    .where(ConversationSessionMeta.session_id == sid)
+                ).scalar_one_or_none()
+                
+                if meta:
+                    custom_title = meta
+                
+                if custom_title:
+                    title = custom_title
+                else:
+                    # 取该会话第一条 user 消息作为标题
+                    first_user_msg = session.execute(
+                        select(ConversationMessage.content)
+                        .where(
+                            and_(
+                                ConversationMessage.session_id == sid,
+                                ConversationMessage.role == "user",
+                            )
                         )
-                    )
-                    .order_by(ConversationMessage.created_at)
-                    .limit(1)
-                ).scalar()
-                title = (first_user_msg or "新对话")[:60]
+                        .order_by(ConversationMessage.created_at)
+                        .limit(1)
+                    ).scalar()
+                    title = (first_user_msg or "新对话")[:60]
 
                 results.append({
                     "session_id": sid,
@@ -2164,7 +2191,53 @@ class DatabaseManager:
                     ConversationMessage.session_id == session_id
                 )
             )
+            # 也删除元数据
+            session.execute(
+                delete(ConversationSessionMeta).where(
+                    ConversationSessionMeta.session_id == session_id
+                )
+            )
             return result.rowcount
+
+    def update_conversation_session_title(self, session_id: str, custom_title: str) -> bool:
+        """
+        更新会话的自定义标题
+
+        Args:
+            session_id: 会话 ID
+            custom_title: 自定义标题
+
+        Returns:
+            True if updated, False if session not found
+        """
+        with self.session_scope() as session:
+            # 检查会话是否存在
+            exists = session.execute(
+                select(ConversationMessage.session_id)
+                .where(ConversationMessage.session_id == session_id)
+                .limit(1)
+            ).scalar()
+
+            if not exists:
+                return False
+
+            # 查找或创建元数据记录
+            meta = session.execute(
+                select(ConversationSessionMeta)
+                .where(ConversationSessionMeta.session_id == session_id)
+            ).scalar_one_or_none()
+
+            if meta:
+                meta.custom_title = custom_title
+                meta.updated_at = datetime.now()
+            else:
+                meta = ConversationSessionMeta(
+                    session_id=session_id,
+                    custom_title=custom_title
+                )
+                session.add(meta)
+
+            return True
 
     # ------------------------------------------------------------------
     # LLM usage tracking

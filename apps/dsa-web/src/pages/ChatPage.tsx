@@ -55,6 +55,8 @@ const ChatPage: React.FC = () => {
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [isFollowUpContextLoading, setIsFollowUpContextLoading] = useState(false);
@@ -67,6 +69,8 @@ const ChatPage: React.FC = () => {
   const [exportingMessageId, setExportingMessageId] = useState<string | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState<string | null>(null);
   const [showQuestionNav, setShowQuestionNav] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const copyResetTimerRef = useRef<Partial<Record<string, number>>>({});
   const messagesViewportRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -283,6 +287,52 @@ const ChatPage: React.FC = () => {
     setDeleteConfirmId(null);
   }, [deleteConfirmId, sessionId, loadSessions, handleStartNewChat]);
 
+  const handleUpdateTitle = useCallback((sessionId: string, newTitle: string) => {
+    if (!newTitle.trim()) return;
+    agentApi.updateChatSessionTitle(sessionId, newTitle.trim())
+      .then(() => {
+        loadSessions();
+        setEditingSessionId(null);
+        setEditingTitle('');
+      })
+      .catch((error) => {
+        console.error('Failed to update session title:', error);
+      });
+  }, [loadSessions]);
+
+  // Handle image selection
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Check file type
+    if (!file.type.startsWith('image/')) {
+      alert('请选择图片文件');
+      return;
+    }
+    
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('图片大小不能超过 5MB');
+      return;
+    }
+    
+    setSelectedImage(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  // Clear selected image
+  const clearImage = useCallback(() => {
+    setSelectedImage(null);
+    setImagePreview(null);
+  }, []);
+
   // Handle follow-up from report page: ?stock=600519&name=贵州茅台&recordId=xxx
   useEffect(() => {
     const stock = sanitizeFollowUpStockCode(searchParams.get('stock'));
@@ -327,24 +377,36 @@ const ChatPage: React.FC = () => {
       const usedSkillIds = normalizeSelectedSkillIds(overrideSkillIds ?? selectedSkillIds);
       const usedSkillNames = usedSkillIds.length > 0 ? getSkillNames(usedSkillIds) : ['通用'];
 
+      // Prepare image data if selected
+      let imageData: string | undefined;
+      let imageMime: string | undefined;
+      if (selectedImage && imagePreview) {
+        // Extract base64 data from data URL
+        const base64Data = imagePreview.split(',')[1];
+        imageData = base64Data;
+        imageMime = selectedImage.type;
+      }
+
       const payload = {
         message: msgText,
         session_id: sessionId,
         ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
         context: followUpContextRef.current ?? undefined,
+        ...(imageData ? { image_data: imageData, image_mime: imageMime } : {}),
       };
       followUpHydrationTokenRef.current += 1;
       followUpContextRef.current = null;
       setIsFollowUpContextLoading(false);
 
       setInput('');
+      clearImage(); // Clear image after sending
       requestScrollToBottom('smooth');
       await startStream(payload, {
         skillNames: usedSkillNames,
         skillName: usedSkillNames.join('、'),
       });
     },
-    [getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
+    [getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream, selectedImage, imagePreview, clearImage],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -606,53 +668,92 @@ const ChatPage: React.FC = () => {
           <div className="space-y-2">
             {sessions.map((s) => (
               <div key={s.session_id} className="session-item-row">
-                <button
-                  type="button"
-                  onClick={() => handleSwitchSession(s.session_id)}
-                  className={`session-item ${s.session_id === sessionId ? 'active' : ''}`}
-                  aria-label={`切换到对话 ${s.title}`}
-                  aria-current={s.session_id === sessionId ? 'page' : undefined}
-                >
-                  <div className="indicator" />
-                  <div className="content">
-                    <span className="title">{s.title}</span>
-                    <div className="mt-0.5 flex items-center gap-2">
-                      <span className="meta">
-                        {s.message_count} 条对话
-                      </span>
-                      {s.last_active && (
-                        <>
-                          <span className="separator" />
-                          <span className="meta">
-                            {new Date(s.last_active).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
-                          </span>
-                        </>
-                      )}
+                {editingSessionId === s.session_id ? (
+                  <div className="session-item active">
+                    <div className="indicator" />
+                    <div className="content flex-1">
+                      <input
+                        type="text"
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleUpdateTitle(s.session_id, editingTitle);
+                          } else if (e.key === 'Escape') {
+                            setEditingSessionId(null);
+                            setEditingTitle('');
+                          }
+                        }}
+                        onBlur={() => {
+                          if (editingTitle.trim()) {
+                            handleUpdateTitle(s.session_id, editingTitle);
+                          } else {
+                            setEditingSessionId(null);
+                            setEditingTitle('');
+                          }
+                        }}
+                        autoFocus
+                        className="w-full bg-transparent text-sm text-foreground focus:outline-none"
+                        placeholder="输入会话标题"
+                        maxLength={100}
+                      />
                     </div>
                   </div>
-                </button>
-                <button
-                  type="button"
-                  className="delete-btn"
-                  onClick={() => {
-                    setDeleteConfirmId(s.session_id);
-                  }}
-                  aria-label={`删除对话 ${s.title}`}
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchSession(s.session_id)}
+                      className={`session-item ${s.session_id === sessionId ? 'active' : ''}`}
+                      aria-label={`切换到对话 ${s.title}`}
+                      aria-current={s.session_id === sessionId ? 'page' : undefined}
+                      onDoubleClick={() => {
+                        setEditingSessionId(s.session_id);
+                        setEditingTitle(s.title);
+                      }}
+                    >
+                      <div className="indicator" />
+                      <div className="content">
+                        <span className="title">{s.title}</span>
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <span className="meta">
+                            {s.message_count} 条对话
+                          </span>
+                          {s.last_active && (
+                            <>
+                              <span className="separator" />
+                              <span className="meta">
+                                {new Date(s.last_active).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      className="delete-btn"
+                      onClick={() => {
+                        setDeleteConfirmId(s.session_id);
+                      }}
+                      aria-label={`删除对话 ${s.title}`}
+                    >
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -1044,16 +1145,29 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      msg.content
-                        .split('\n')
-                        .map((line, i) => (
-                          <p
-                            key={i}
-                            className="mb-1 last:mb-0 leading-relaxed"
-                          >
-                            {line || '\u00A0'}
-                          </p>
-                        ))
+                      <div className="space-y-2">
+                        {/* Display image if present */}
+                        {msg.imageData && (
+                          <div className="mb-2">
+                            <img
+                              src={msg.imageData}
+                              alt="Uploaded"
+                              className="max-h-48 max-w-full rounded-lg border border-border"
+                            />
+                          </div>
+                        )}
+                        {/* Display text content */}
+                        {msg.content
+                          .split('\n')
+                          .map((line, i) => (
+                            <p
+                              key={i}
+                              className="mb-1 last:mb-0 leading-relaxed"
+                            >
+                              {line || '\u00A0'}
+                            </p>
+                          ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1250,25 +1364,78 @@ const ChatPage: React.FC = () => {
             )}
 
               <div className="flex items-end gap-3">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
-                  disabled={loading}
-                  rows={1}
-                  className="input-surface input-focus-glow flex-1 min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ height: 'auto' }}
-                  onInput={(e) => {
-                    const t = e.target as HTMLTextAreaElement;
-                    t.style.height = 'auto';
-                    t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
-                  }}
-                />
+                {/* Image upload button */}
+                <div className="flex-shrink-0">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageSelect}
+                    className="hidden"
+                    id="image-upload"
+                  />
+                  <label
+                    htmlFor="image-upload"
+                    className="flex items-center justify-center w-11 h-11 rounded-xl border border-border bg-transparent cursor-pointer hover:bg-accent transition-all"
+                    aria-label="上传图片"
+                  >
+                    <svg
+                      className="w-5 h-5 text-secondary-text"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                  </label>
+                </div>
+
+                <div className="flex-1 min-w-0 space-y-2">
+                  {/* Image preview */}
+                  {imagePreview && (
+                    <div className="relative inline-block">
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="max-h-32 max-w-full rounded-lg border border-border"
+                      />
+                      <button
+                        type="button"
+                        onClick={clearImage}
+                        className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center text-xs hover:bg-red-600"
+                        aria-label="移除图片"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Text input */}
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="例如：分析 600519 / 茅台现在适合买入吗？ (Enter 发送, Shift+Enter 换行)"
+                    disabled={loading}
+                    rows={1}
+                    className="input-surface input-focus-glow w-full min-h-[44px] max-h-[200px] rounded-xl border bg-transparent px-4 py-2.5 text-sm transition-all focus:outline-none resize-none disabled:cursor-not-allowed disabled:opacity-60"
+                    style={{ height: 'auto' }}
+                    onInput={(e) => {
+                      const t = e.target as HTMLTextAreaElement;
+                      t.style.height = 'auto';
+                      t.style.height = `${Math.min(t.scrollHeight, 200)}px`;
+                    }}
+                  />
+                </div>
+
                 <Button
                   variant="primary"
                   onClick={() => handleSend()}
-                  disabled={!input.trim() || loading}
+                  disabled={(!input.trim() && !selectedImage) || loading}
                   isLoading={loading}
                   className="btn-primary flex-shrink-0 px-6"
                 >

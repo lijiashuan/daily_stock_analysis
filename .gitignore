@@ -74,6 +74,7 @@ local/
 run.sh
 
 verify_*.py
+merge_commit_msg.txt
 
 # ignore Claude workspace artifacts, but keep shared repo skills versioned
 .claude/*

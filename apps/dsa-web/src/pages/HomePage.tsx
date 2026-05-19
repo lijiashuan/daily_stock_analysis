@@ -542,8 +542,8 @@ const HomePage: React.FC = () => {
       data-testid="home-dashboard"
       className="flex h-[calc(100vh-5rem)] w-full flex-col overflow-hidden md:flex-row sm:h-[calc(100vh-5.5rem)] lg:h-[calc(100vh-2rem)]"
     >
-      <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full lg:max-w-6xl mx-auto w-full">
-        <header className="relative z-30 flex min-w-0 flex-shrink-0 items-center overflow-visible px-3 py-3 md:px-4 md:py-4">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0 max-w-full mx-auto w-full">
+        <header className="flex min-w-0 flex-shrink-0 items-center overflow-hidden px-3 py-3 md:px-4 md:py-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2.5 md:flex-row md:items-center">
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <button
@@ -579,7 +579,7 @@ const HomePage: React.FC = () => {
                     onClick={() => setStrategyMenuOpen((open) => !open)}
                     onKeyDown={handleStrategyButtonKeyDown}
                     disabled={isAnalyzing}
-                    className="home-surface-button flex h-10 max-w-[8.5rem] items-center gap-1.5 rounded-xl px-3 text-xs text-foreground disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[11rem]"
+                    className="home-surface-button flex h-9 max-w-[8.5rem] items-center gap-1.5 rounded-xl px-3 text-xs text-foreground disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[11rem]"
                   >
                     <SlidersHorizontal className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
                     <span className="truncate">{selectedStrategy?.name || '策略'}</span>
@@ -590,7 +590,7 @@ const HomePage: React.FC = () => {
                       role="menu"
                       aria-labelledby="strategy-menu-button"
                       onKeyDown={handleStrategyMenuKeyDown}
-                      className="absolute right-0 top-11 z-[120] max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
+                      className="absolute right-0 top-10 z-[120] max-h-80 w-[min(18rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-subtle bg-elevated p-1.5 text-sm text-foreground shadow-2xl"
                     >
                       {strategyOptions.map((option, index) => {
                         const selected = selectedStrategyId === option.id;
@@ -633,7 +633,7 @@ const HomePage: React.FC = () => {
               <Button
                 type="button"
                 variant="secondary"
-                size="md"
+                size="sm"
                 isLoading={isSubmittingMarketReview}
                 loadingText="提交中"
                 onClick={() => void handleTriggerMarketReview()}
@@ -787,7 +787,7 @@ const HomePage: React.FC = () => {
                 <DashboardStateBlock title="加载报告中..." loading />
               </div>
             ) : selectedReport ? (
-              <div className="max-w-4xl space-y-4 pb-8">
+              <div className="space-y-4 pb-8">
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
                     variant="home-action-ai"

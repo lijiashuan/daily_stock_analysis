@@ -50,6 +50,8 @@ class ChatRequest(BaseModel):
         validation_alias=AliasChoices("skills", "strategies"),
     )
     context: Optional[Dict[str, Any]] = None  # Previous analysis context for data reuse
+    image_data: Optional[str] = None  # Base64 encoded image data
+    image_mime: Optional[str] = None  # MIME type of the image
 
     @property
     def effective_skills(self) -> Optional[List[str]]:
@@ -241,6 +243,27 @@ async def delete_chat_session(session_id: str):
     return {"deleted": count}
 
 
+class UpdateSessionTitleRequest(BaseModel):
+    """Request body for updating chat session title."""
+    title: str = Field(..., min_length=1, max_length=100)
+
+
+@router.put("/chat/sessions/{session_id}/title")
+async def update_chat_session_title(session_id: str, request: UpdateSessionTitleRequest):
+    """更新指定会话的自定义标题"""
+    from src.storage import get_db
+    success = get_db().update_conversation_session_title(session_id, request.title)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found"
+            }
+        )
+    return {"success": True, "title": request.title}
+
+
 class SendChatRequest(BaseModel):
     """Request body for sending chat content to notification channels."""
 
@@ -396,6 +419,46 @@ async def agent_chat_stream(request: ChatRequest):
     stream_ctx = dict(request.context or {})
     if skills is not None:
         stream_ctx["skills"] = skills
+
+    # Handle image recognition if provided
+    if request.image_data and request.image_mime:
+        try:
+            from src.services.image_stock_extractor import extract_stock_codes_from_image
+            import base64
+            
+            # Decode base64 image
+            image_bytes = base64.b64decode(request.image_data)
+            
+            # Extract stock codes from image
+            items, raw_text = extract_stock_codes_from_image(image_bytes, request.image_mime)
+            
+            if items:
+                # Format recognized stocks into message
+                stock_descriptions = []
+                for code, name, confidence in items:
+                    if name:
+                        stock_descriptions.append(f"{name}({code})")
+                    else:
+                        stock_descriptions.append(code)
+                
+                stocks_text = "、".join(stock_descriptions)
+                enhanced_message = f"[图片识别] 识别到股票：{stocks_text}\n\n{request.message}"
+                logger.info(f"[Chat Image] Recognized {len(items)} stocks: {stocks_text}")
+            else:
+                enhanced_message = f"[图片识别] 未在图片中识别到股票信息\n\n{request.message}"
+                logger.warning("[Chat Image] No stocks recognized in image")
+            
+            # Update request message with recognized info
+            request.message = enhanced_message
+            
+            # Send recognition result via SSE
+            await queue.put({
+                "type": "image_recognized",
+                "stocks": [{"code": code, "name": name, "confidence": conf} for code, name, conf in items],
+            })
+        except Exception as e:
+            logger.error(f"[Chat Image] Recognition failed: {e}")
+            request.message = f"[图片识别失败] {str(e)}\n\n{request.message}"
 
     def progress_callback(event: dict):
         # Enrich tool events with display names

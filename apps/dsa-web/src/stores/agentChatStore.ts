@@ -31,6 +31,7 @@ export interface Message {
   skillNames?: string[];
   skillName?: string;
   thinkingSteps?: ProgressStep[];
+  imageData?: string; // Base64 data URL for display
 }
 
 export interface StreamMeta {
@@ -234,6 +235,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       skill: payload.skills?.[0],
       skillNames,
       skillName,
+      imageData: payload.image_data ? `data:${payload.image_mime};base64,${payload.image_data}` : undefined,
     };
 
     set((s) => ({

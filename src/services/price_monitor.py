@@ -166,18 +166,27 @@ class PriceMonitor:
                     current_price = float(quote.price)
                     
                     # 判断是否达到预警价
-                    # 对于卖出操作：当前价 >= 预警价
-                    # 对于买入操作：当前价 <= 预警价
+                    # 通过关键词判断操作类型
                     is_triggered = False
-                    if "卖出" in rule.operation or rule.operation == "sell":
+                    
+                    # 卖出/减仓操作：当前价 >= 预警价（涨到目标价卖出）
+                    if "卖出" in rule.operation or "减仓" in rule.operation or rule.operation == "sell":
                         is_triggered = current_price >= rule.watch_price
-                    elif "买入" in rule.operation or rule.operation == "buy":
+                    # 买入/补仓操作：当前价 <= 预警价（跌到目标价买入）
+                    elif "买入" in rule.operation or "补仓" in rule.operation or rule.operation == "buy":
                         is_triggered = current_price <= rule.watch_price
+                    # 跌破止损操作：当前价 <= 预警价（跌破支撑位）
+                    elif "跌破" in rule.operation or "止损" in rule.operation:
+                        is_triggered = current_price <= rule.watch_price
+                    # 反弹到某个价格：当前价 >= 预警价
+                    elif "反弹" in rule.operation or "关注" in rule.operation:
+                        is_triggered = current_price >= rule.watch_price
                     else:
-                        # 默认：价格波动超过 1%
-                        if rule.watch_price > 0:
-                            change_pct = abs(current_price - rule.watch_price) / rule.watch_price * 100
-                            is_triggered = change_pct >= 1.0
+                        # 如果没有明确的操作关键词，默认不触发（避免误触发）
+                        logger.debug(
+                            f"[PriceMonitor] {stock_code} 预警规则缺少操作关键词，跳过: {rule.operation}"
+                        )
+                        continue
 
                     if is_triggered:
                         rule.triggered = True

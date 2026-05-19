@@ -853,12 +853,47 @@ def main() -> int:
         logger.info(f"Web 服务运行中: http://{args.host}:{args.port}")
         logger.info("通过 /api/v1/analysis/analyze 接口触发分析")
         logger.info(f"API 文档: http://{args.host}:{args.port}/docs")
+        
+        # 在 WebUI 模式下也启动监盘后台任务
+        import threading
+        import time as time_module
+        
+        price_monitor_interval = getattr(config, 'price_monitor_interval_minutes', 5)
+        monitor_running = True
+        
+        def price_monitor_loop():
+            """监盘后台循环（每 5 分钟检查一次）"""
+            logger.info(f"[PriceMonitor] 后台监盘已启动，检查间隔: {price_monitor_interval} 分钟")
+            while monitor_running:
+                try:
+                    from src.services.price_monitor import get_price_monitor
+                    monitor = get_price_monitor()
+                    if monitor.is_enabled():
+                        triggered = monitor.check_once()
+                        if triggered:
+                            logger.info(f"[PriceMonitor] 本轮触发 {len(triggered)} 条价格预警")
+                    # 等待指定间隔
+                    for _ in range(price_monitor_interval * 60):
+                        if not monitor_running:
+                            break
+                        time_module.sleep(1)
+                except Exception as e:
+                    logger.error(f"[PriceMonitor] 后台监盘异常: {e}")
+                    time_module.sleep(60)  # 出错后等待 1 分钟再继续
+        
+        # 启动监盘线程
+        monitor_thread = threading.Thread(target=price_monitor_loop, daemon=True, name="PriceMonitor")
+        monitor_thread.start()
+        logger.info("[PriceMonitor] 监盘后台线程已启动")
+        
         logger.info("按 Ctrl+C 退出...")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("\n用户中断，程序退出")
+            monitor_running = False
+            monitor_thread.join(timeout=2)
         return 0
 
     try:

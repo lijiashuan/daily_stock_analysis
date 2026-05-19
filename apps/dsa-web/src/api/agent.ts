@@ -14,6 +14,8 @@ export interface ChatRequest {
 export interface ChatStreamRequest extends ChatRequest {
   session_id?: string;
   context?: unknown;
+  image_data?: string;  // Base64 encoded image data
+  image_mime?: string;  // MIME type of the image
 }
 
 export interface ChatResponse {
@@ -70,6 +72,10 @@ export const agentApi = {
   },
   async deleteChatSession(sessionId: string): Promise<void> {
     await apiClient.delete(`/api/v1/agent/chat/sessions/${sessionId}`);
+  },
+  async updateChatSessionTitle(sessionId: string, title: string): Promise<{ success: boolean; title: string }> {
+    const response = await apiClient.put<{ success: boolean; title: string }>(`/api/v1/agent/chat/sessions/${sessionId}/title`, { title });
+    return response.data;
   },
   async sendChat(content: string): Promise<{ success: boolean }> {
     const response = await apiClient.post<{
