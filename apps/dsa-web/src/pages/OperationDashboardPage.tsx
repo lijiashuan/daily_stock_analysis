@@ -59,7 +59,7 @@ interface ExecutionLogEntry {
   note: string;
 }
 
-// Auto Watch types (v2.0 new)
+// Auto Watch types (v2.0/v2.1)
 interface AutoWatchTrigger {
   type: string;
   target?: number;
@@ -68,6 +68,7 @@ interface AutoWatchTrigger {
   volume_ratio_threshold?: number;
   price_above?: number;
   confirm_bars?: number;
+  logic_note?: string; // v2.1: 逻辑说明
 }
 
 interface AutoWatchCondition {
@@ -75,10 +76,12 @@ interface AutoWatchCondition {
     volume_ratio_below?: number;
     market_depth_sell_wall_gte?: number;
     price_drop_to?: number;
+    logic_note?: string; // v2.1: 否决条件说明
   };
   cancel_if?: {
     price_gap_open_above?: number;
     time_passed?: string;
+    logic_note?: string; // v2.1: 撤销条件说明
   };
 }
 
@@ -99,7 +102,9 @@ interface AutoWatch {
   max_price?: number;
   min_price?: number;
   trigger: AutoWatchTrigger;
-  condition: AutoWatchCondition;
+  reject_if?: AutoWatchCondition['reject_if']; // v2.1: 平铺字段
+  cancel_if?: AutoWatchCondition['cancel_if']; // v2.1: 平铺字段
+  condition?: AutoWatchCondition; // v2.0: 嵌套字段（向后兼容）
   execution: AutoWatchExecution;
   priority: number;
   reason: string;
@@ -116,11 +121,20 @@ interface WatchRules {
   };
 }
 
+interface LogicFlow {
+  version: string;
+  description: string;
+  trigger: string;
+  reject_if: string;
+  cancel_if: string;
+}
+
 interface DashboardDataV2 {
   dashboard_version: string;
   generated_at?: string;
   trade_date?: string;
   note?: string;
+  logic_flow?: LogicFlow; // v2.1: 逻辑流程说明
   summary: {
     total_assets: number;
     cash: number;
@@ -128,6 +142,10 @@ interface DashboardDataV2 {
     stock_value: number;
     unrealized_pnl: number;
     indexes: MarketIndexes;
+    sector_wind?: { // v2.1: 板块风向
+      top: string[];
+      note: string;
+    };
   };
   orders: Order[];
   positions: Position[];
@@ -230,9 +248,9 @@ interface DashboardDataV1 {
 // Union type supporting both versions
 type DashboardData = DashboardDataV1 | DashboardDataV2;
 
-// Type guard for v2.0 format
+// Type guard for v2.0/v2.1 format
 const isDashboardV2 = (data: DashboardData): data is DashboardDataV2 => {
-  return data.dashboard_version === '2.0' || 'orders' in data;
+  return data.dashboard_version === '2.0' || data.dashboard_version === '2.1' || 'orders' in data;
 };
 
 interface ExecutionLog {
@@ -929,6 +947,37 @@ const OperationDashboardPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Logic Flow Banner - v2.1 */}
+      {isV2 && (dashboardData as DashboardDataV2).logic_flow && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 shadow-sm dark:border-blue-800 dark:bg-blue-900/20">
+          <div className="flex items-start gap-3">
+            <Target className="mt-0.5 h-5 w-5 shrink-0 text-blue-600 dark:text-blue-400" />
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                 执行逻辑流程 (v{(dashboardData as DashboardDataV2).logic_flow!.version})
+              </h3>
+              <p className="mt-1 text-sm text-blue-700 dark:text-blue-400">
+                {(dashboardData as DashboardDataV2).logic_flow!.description}
+              </p>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="rounded-lg border border-blue-200 bg-white p-3 dark:border-blue-700 dark:bg-slate-800">
+                  <p className="text-xs font-medium text-blue-600 dark:text-blue-400">① 启动条件 (trigger)</p>
+                  <p className="mt-1 text-xs text-secondary-text">{(dashboardData as DashboardDataV2).logic_flow!.trigger}</p>
+                </div>
+                <div className="rounded-lg border border-orange-200 bg-white p-3 dark:border-orange-700 dark:bg-slate-800">
+                  <p className="text-xs font-medium text-orange-600 dark:text-orange-400">② 否决条件 (reject_if)</p>
+                  <p className="mt-1 text-xs text-secondary-text">{(dashboardData as DashboardDataV2).logic_flow!.reject_if}</p>
+                </div>
+                <div className="rounded-lg border border-red-200 bg-white p-3 dark:border-red-700 dark:bg-slate-800">
+                  <p className="text-xs font-medium text-red-600 dark:text-red-400"> 撤销条件 (cancel_if)</p>
+                  <p className="mt-1 text-xs text-secondary-text">{(dashboardData as DashboardDataV2).logic_flow!.cancel_if}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {dashboardData.summary ? (
@@ -1484,36 +1533,67 @@ const OperationDashboardPage: React.FC = () => {
                       </div>
                       
                       {/* Trigger */}
-                      <p className="mt-2 text-sm text-secondary-text">
-                        <span className="font-medium">触发条件:</span> {triggerLabel}
-                      </p>
+                      <div className="mt-2 space-y-1">
+                        <p className="text-sm text-secondary-text">
+                          <span className="font-medium text-blue-600 dark:text-blue-400">① 启动条件:</span> {triggerLabel}
+                        </p>
+                        {watch.trigger.logic_note && (
+                          <p className="text-xs text-blue-500 dark:text-blue-400 ml-2">💡 {watch.trigger.logic_note}</p>
+                        )}
+                      </div>
                       
-                      {/* Condition (if exists) */}
-                      {(watch.condition.reject_if || watch.condition.cancel_if) && (
-                        <div className="mt-2 space-y-1 text-xs text-secondary-text">
-                          {watch.condition.reject_if && Object.keys(watch.condition.reject_if).length > 0 && (
-                            <p>
-                              <span className="font-medium text-orange-600 dark:text-orange-400">拒绝条件:</span>{' '}
-                              {Object.entries(watch.condition.reject_if).map(([key, value]) => (
-                                <span key={key} className="mr-2">
-                                  {key === 'volume_ratio_below' && `量比低于 ${value}`}
-                                  {key === 'market_depth_sell_wall_gte' && `卖盘挂单 >= ${value}`}
-                                  {key === 'price_drop_to' && `价格跌破 ${value}`}
-                                </span>
-                              ))}
-                            </p>
-                          )}
-                          {watch.condition.cancel_if && Object.keys(watch.condition.cancel_if).length > 0 && (
-                            <p>
-                              <span className="font-medium text-red-600 dark:text-red-400">撤销条件:</span>{' '}
-                              {Object.entries(watch.condition.cancel_if).map(([key, value]) => (
-                                <span key={key} className="mr-2">
-                                  {key === 'price_gap_open_above' && `跳空高开超过 ${value}`}
-                                  {key === 'time_passed' && `时间超过 ${value}`}
-                                </span>
-                              ))}
-                            </p>
-                          )}
+                      {/* Reject If (v2.1: flat or v2.0: nested) */}
+                      {(watch.reject_if || (watch.condition?.reject_if && Object.keys(watch.condition.reject_if).some(k => k !== 'logic_note'))) && (
+                        <div className="mt-2 space-y-1">
+                          <p className="text-sm text-secondary-text">
+                            <span className="font-medium text-orange-600 dark:text-orange-400">② 否决条件:</span>{' '}
+                            {(() => {
+                              const rejectData = watch.reject_if || watch.condition?.reject_if;
+                              if (!rejectData) return null;
+                              return Object.entries(rejectData)
+                                .filter(([key]) => key !== 'logic_note')
+                                .map(([key, value]) => (
+                                  <span key={key} className="mr-2">
+                                    {key === 'volume_ratio_below' && `量比低于 ${value}`}
+                                    {key === 'market_depth_sell_wall_gte' && `卖盘挂单 >= ${value}`}
+                                    {key === 'price_drop_to' && `价格跌破 ${value}`}
+                                  </span>
+                                ));
+                            })()}
+                          </p>
+                          {(() => {
+                            const rejectData = watch.reject_if || watch.condition?.reject_if;
+                            return rejectData?.logic_note ? (
+                              <p className="text-xs text-orange-500 dark:text-orange-400 ml-2">💡 {rejectData.logic_note}</p>
+                            ) : null;
+                          })()}
+                        </div>
+                      )}
+                      
+                      {/* Cancel If (v2.1: flat or v2.0: nested) */}
+                      {(watch.cancel_if || (watch.condition?.cancel_if && Object.keys(watch.condition.cancel_if).some(k => k !== 'logic_note'))) && (
+                        <div className="mt-2 space-y-1">
+                          <p className="text-sm text-secondary-text">
+                            <span className="font-medium text-red-600 dark:text-red-400"> 撤销条件:</span>{' '}
+                            {(() => {
+                              const cancelData = watch.cancel_if || watch.condition?.cancel_if;
+                              if (!cancelData) return null;
+                              return Object.entries(cancelData)
+                                .filter(([key]) => key !== 'logic_note')
+                                .map(([key, value]) => (
+                                  <span key={key} className="mr-2">
+                                    {key === 'price_gap_open_above' && `跳空高开超过 ${value}`}
+                                    {key === 'time_passed' && `时间超过 ${value}`}
+                                  </span>
+                                ));
+                            })()}
+                          </p>
+                          {(() => {
+                            const cancelData = watch.cancel_if || watch.condition?.cancel_if;
+                            return cancelData?.logic_note ? (
+                              <p className="text-xs text-red-500 dark:text-red-400 ml-2">💡 {cancelData.logic_note}</p>
+                            ) : null;
+                          })()}
                         </div>
                       )}
                       
