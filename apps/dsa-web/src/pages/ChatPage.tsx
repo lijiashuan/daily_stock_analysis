@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { cn } from '../utils/cn';
 import { agentApi } from '../api/agent';
 import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, ScrollArea, Tooltip } from '../components/common';
+import { CodeBlock } from '../components/common/CodeBlock';
 import { getParsedApiError } from '../api/error';
 import type { SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
@@ -1139,7 +1140,29 @@ const ChatPage: React.FC = () => {
                           </div>
                         </div>
                         <div className="chat-prose pr-20 sm:pr-24">
-                          <Markdown remarkPlugins={[remarkGfm]}>
+                          <Markdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              code({ className, children, ...props }) {
+                                const match = /language-(\w+)/.exec(className || '');
+                                const isInline = !match;
+                                
+                                if (isInline) {
+                                  return (
+                                    <code className={className} {...props}>
+                                      {children}
+                                    </code>
+                                  );
+                                }
+                                
+                                return (
+                                  <CodeBlock className={className}>
+                                    {children}
+                                  </CodeBlock>
+                                );
+                              },
+                            }}
+                          >
                             {msg.content}
                           </Markdown>
                         </div>
