@@ -509,6 +509,8 @@ class ReportExportService:
             try:
                 import subprocess
                 
+                logger.debug(f"PDF export: HTML content length = {len(html_doc)} chars")
+                
                 # Windows 上硬编码 wkhtmltopdf 路径
                 wkhtmltopdf_path = r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe'
                 
@@ -549,7 +551,19 @@ class ReportExportService:
                     error_msg = process.stderr.decode('utf-8', errors='ignore')
                     raise RuntimeError(f"wkhtmltopdf failed: {error_msg}")
                 
-                logger.info(f"PDF 文档已保存到 (wkhtmltopdf): {filepath}")
+                # 验证生成的 PDF 文件
+                if not filepath.exists():
+                    raise RuntimeError("PDF file was not created")
+                
+                pdf_size = filepath.stat().st_size
+                html_size = len(html_doc.encode('utf-8'))
+                
+                # HTML 到 PDF 的压缩比通常在 30%-70% 之间
+                # 如果 PDF 太小（< 10KB）或比例异常，可能生成不完整
+                if pdf_size < 10000:  # Less than 10KB is suspicious
+                    logger.warning(f"Generated PDF is very small: {pdf_size} bytes (HTML was {html_size} bytes)")
+                
+                logger.info(f"PDF 文档已保存到 (wkhtmltopdf): {filepath} ({pdf_size} bytes)")
                 return str(filepath)
                 
             except FileNotFoundError:
