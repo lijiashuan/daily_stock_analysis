@@ -249,19 +249,39 @@ class PriceMonitor:
         
         # 根据不同的触发类型判断
         if trigger_type == "price_drop_to":
-            # 价格跌至目标价
+            # 价格跌至目标价（用于买入/补仓）
             target = trigger_params.get("target", rule.watch_price)
             return current_price <= target
             
         elif trigger_type == "price_rise_to":
-            # 价格上涨至目标价
+            # 价格上涨至目标价（用于卖出）
             target = trigger_params.get("target", rule.watch_price)
             return current_price >= target
             
+        elif trigger_type == "price_below":
+            # 价格低于目标价（同 price_drop_to）
+            target = trigger_params.get("target", trigger_params.get("value", rule.watch_price))
+            return current_price <= target
+            
+        elif trigger_type == "price_above":
+            # 价格高于目标价（同 price_rise_to）
+            target = trigger_params.get("target", trigger_params.get("value", rule.watch_price))
+            return current_price >= target
+            
+        elif trigger_type == "price_drop_below":
+            # 价格跌破目标价（用于止损监控）
+            target = trigger_params.get("target", rule.watch_price)
+            return current_price < target
+            
         elif trigger_type == "price_alert":
             # 价格提醒（只通知，不执行）
+            # 修复：只在价格接近目标价时触发（误差 1% 以内）
             target = trigger_params.get("target", rule.watch_price)
-            return current_price >= target or current_price <= target
+            if target == 0:
+                return False
+            price_diff_pct = abs(current_price - target) / target
+            # 当价格偏离目标价在 1% 以内时触发提醒
+            return price_diff_pct <= 0.01
             
         elif trigger_type == "volume_surge_and_price_break":
             # 放量突破（需要量比和价格同时满足）
