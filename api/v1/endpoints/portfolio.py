@@ -251,6 +251,35 @@ def list_trades(
         raise _internal_error("List trade events failed", exc)
 
 
+@router.get(
+    "/trades/today",
+    response_model=PortfolioTradeListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="List today's trade events for operation dashboard",
+)
+def list_today_trades(
+    account_id: Optional[int] = Query(None, description="Optional account id"),
+) -> PortfolioTradeListResponse:
+    """Get today's executed trades for operation dashboard execution log."""
+    service = PortfolioService()
+    try:
+        today = date.today()
+        data = service.list_trade_events(
+            account_id=account_id,
+            date_from=today,
+            date_to=today,
+            symbol=None,
+            side=None,
+            page=1,
+            page_size=100,  # Get all today's trades
+        )
+        return PortfolioTradeListResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("List today's trade events failed", exc)
+
+
 @router.delete(
     "/trades/{trade_id}",
     response_model=PortfolioDeleteResponse,

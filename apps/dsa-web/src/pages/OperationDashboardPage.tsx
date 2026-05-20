@@ -307,28 +307,14 @@ const OperationDashboardPage: React.FC = () => {
         // Detect format version
         const v2Format = isDashboardV2(parsed);
         setIsV2(v2Format);
-        
-        // For v2.0/v2.1, load execution_log from JSON (these are TODAY's executed actions)
-        if (v2Format && 'execution_log' in parsed && Array.isArray(parsed.execution_log)) {
-          const logs: ExecutionLog[] = (parsed as DashboardDataV2).execution_log!.map((log, idx) => ({
-            id: `exec_${idx}`,
-            stock_code: '',
-            stock_name: log.stock,
-            action: log.action === 'cancel' ? 'sell' : (log.action as 'buy' | 'sell'),
-            quantity: typeof log.qty === 'number' ? log.qty : 0,
-            executed_price: log.price,
-            executed_at: log.time.split(' ')[1] || log.time,
-            note: log.note,
-          }));
-          setExecutionLogs(logs);
-        } else {
-          setExecutionLogs([]);
-        }
       }
       
       if (savedPushStatus) {
         setPushStatus(JSON.parse(savedPushStatus));
       }
+      
+      // Load today's execution logs from backend trade history
+      loadTodayExecutionLogs();
     } catch (err) {
       console.error('Failed to load saved dashboard data:', err);
     }
@@ -357,6 +343,35 @@ const OperationDashboardPage: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to load monitor status:', err);
+    }
+  };
+
+  // Load today's execution logs from backend trade history
+  const loadTodayExecutionLogs = async () => {
+    try {
+      const res = await fetch('/api/v1/portfolio/trades/today');
+      if (res.ok) {
+        const data = await res.json();
+        const trades = data.items || [];
+        
+        // Convert trade records to execution logs
+        const logs: ExecutionLog[] = trades.map((trade: any) => ({
+          id: `trade_${trade.id}`,
+          stock_code: trade.symbol,
+          stock_name: '', // Will be populated if needed
+          action: trade.side as 'buy' | 'sell',
+          quantity: trade.quantity,
+          executed_price: trade.price,
+          executed_at: trade.trade_date.includes('T') 
+            ? trade.trade_date.split('T')[1].substring(0, 5) 
+            : 'N/A',
+          note: trade.note || undefined,
+        }));
+        
+        setExecutionLogs(logs);
+      }
+    } catch (err) {
+      console.error('Failed to load today\'s execution logs:', err);
     }
   };
 
