@@ -303,6 +303,34 @@ const OperationDashboardPage: React.FC = () => {
         const parsed = JSON.parse(savedData);
         setDashboardData(parsed);
         setRawInput(JSON.stringify(parsed, null, 2));
+        
+        // Detect format version
+        const v2Format = isDashboardV2(parsed);
+        setIsV2(v2Format);
+        
+        // For v2.0/v2.1, load execution_log from JSON (only historical logs, not today's actions)
+        if (v2Format && 'execution_log' in parsed && Array.isArray(parsed.execution_log)) {
+          const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+          const logs: ExecutionLog[] = (parsed as DashboardDataV2).execution_log!
+            .filter((log) => {
+              // Only load logs from previous days, not today
+              const logDate = log.time.split(' ')[0]; // Extract date from "2026-05-19 已执行"
+              return logDate !== today;
+            })
+            .map((log, idx) => ({
+              id: `exec_${idx}`,
+              stock_code: '',
+              stock_name: log.stock,
+              action: log.action === 'cancel' ? 'sell' : (log.action as 'buy' | 'sell'),
+              quantity: typeof log.qty === 'number' ? log.qty : 0,
+              executed_price: log.price,
+              executed_at: log.time.split(' ')[1] || log.time,
+              note: log.note,
+            }));
+          setExecutionLogs(logs);
+        } else {
+          setExecutionLogs([]);
+        }
       }
       
       if (savedPushStatus) {
