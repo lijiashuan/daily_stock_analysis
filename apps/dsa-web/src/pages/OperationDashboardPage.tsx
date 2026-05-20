@@ -803,7 +803,7 @@ const OperationDashboardPage: React.FC = () => {
         const res = await fetch('/api/v1/agent/monitor/enable', { method: 'POST' });
         if (res.ok) {
           setAutoMonitorEnabled(true);
-          loadMonitorStatus();
+          // Don't call loadMonitorStatus here to avoid unnecessary re-render
           showToast('success', '自动监盘已启用');
         } else {
           showToast('error', '启用监盘失败');
@@ -816,7 +816,7 @@ const OperationDashboardPage: React.FC = () => {
         const res = await fetch('/api/v1/agent/monitor/disable', { method: 'POST' });
         if (res.ok) {
           setAutoMonitorEnabled(false);
-          loadMonitorStatus();
+          // Don't call loadMonitorStatus here to avoid unnecessary re-render
           showToast('success', '自动监盘已关闭');
         } else {
           showToast('error', '关闭监盘失败');
