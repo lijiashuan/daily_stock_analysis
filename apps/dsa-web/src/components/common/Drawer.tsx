@@ -61,6 +61,7 @@ export const Drawer: React.FC<DrawerProps> = ({
   const titleId = title ? `drawer-title-${side}` : undefined;
   const sidePositionClass = side === 'left' ? 'left-0 justify-start' : 'right-0 justify-end';
   const borderClass = side === 'left' ? 'border-r' : 'border-l';
+  const widthClass = width === 'full' ? '' : width;
 
   return (
     <div className="fixed inset-0 overflow-hidden" style={{ zIndex }} role="presentation">
@@ -73,7 +74,7 @@ export const Drawer: React.FC<DrawerProps> = ({
         onClick={onClose}
       />
 
-      <div className={cn('absolute inset-y-0 flex w-full', sidePositionClass, width)}>
+      <div className={cn('absolute inset-y-0 flex w-full', sidePositionClass, widthClass)}>
         <div
           role="dialog"
           aria-modal="true"

@@ -35,6 +35,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(true);
   const [copiedType, setCopiedType] = useState<'markdown' | 'text' | null>(null);
+  const [isMaximized, setIsMaximized] = useState(false);
 
   // Handle close with animation
   const handleClose = useCallback(() => {
@@ -137,7 +138,7 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
     <Drawer
       isOpen={isOpen}
       onClose={handleClose}
-      width="max-w-3xl"
+      width={isMaximized ? 'full' : 'max-w-3xl'}
       zIndex={100}
       backdropClassName="bg-background/56 backdrop-blur-[2px]"
     >
@@ -158,6 +159,25 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
 
         {/* Right: Toolbar */}
         <div className="flex items-center gap-2">
+          {/* Maximize toggle button */}
+          <Tooltip content={isMaximized ? '还原窗口' : '最大化'}>
+            <button
+              type="button"
+              onClick={() => setIsMaximized(!isMaximized)}
+              className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground"
+              aria-label={isMaximized ? '还原窗口' : '最大化'}
+            >
+              {isMaximized ? (
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3" />
+                </svg>
+              ) : (
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+              )}
+            </button>
+          </Tooltip>
           {/* Download dropdown */}
           <div className="relative group">
             <Tooltip content={text.downloadReport}>
