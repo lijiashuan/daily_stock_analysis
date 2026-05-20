@@ -408,7 +408,7 @@ const OperationDashboardPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ watch_prices: prices }),
       });
-      loadMonitorStatus();
+      // Don't call loadMonitorStatus here to avoid race condition
     } catch (err) {
       console.error('Failed to load rules:', err);
     }
@@ -427,7 +427,7 @@ const OperationDashboardPage: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ auto_watch: rules }),
       });
-      loadMonitorStatus();
+      // Don't call loadMonitorStatus here to avoid race condition
     } catch (err) {
       console.error('Failed to load v2 rules:', err);
     }
