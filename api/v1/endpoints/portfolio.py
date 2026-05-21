@@ -259,25 +259,26 @@ def list_trades(
 )
 def list_today_trades(
     account_id: Optional[int] = Query(None, description="Optional account id"),
+    date: Optional[date] = Query(None, description="Trade date, defaults to today"),
 ) -> PortfolioTradeListResponse:
-    """Get today's executed trades for operation dashboard execution log."""
+    """Get trades for a specific date (defaults to today) for operation dashboard execution log."""
     service = PortfolioService()
     try:
-        today = date.today()
+        target_date = date or date.today()
         data = service.list_trade_events(
             account_id=account_id,
-            date_from=today,
-            date_to=today,
+            date_from=target_date,
+            date_to=target_date,
             symbol=None,
             side=None,
             page=1,
-            page_size=100,  # Get all today's trades
+            page_size=100,  # Get all trades for the day
         )
         return PortfolioTradeListResponse(**data)
     except ValueError as exc:
         raise _bad_request(exc)
     except Exception as exc:
-        raise _internal_error("List today's trade events failed", exc)
+        raise _internal_error("List trade events failed", exc)
 
 
 @router.delete(

@@ -307,14 +307,19 @@ const OperationDashboardPage: React.FC = () => {
         // Detect format version
         const v2Format = isDashboardV2(parsed);
         setIsV2(v2Format);
+        
+        // Load today's execution logs from backend trade history
+        if (v2Format) {
+          const v2Data = parsed as DashboardDataV2;
+          loadTodayExecutionLogs(v2Data.trade_date);
+        } else {
+          loadTodayExecutionLogs();
+        }
       }
       
       if (savedPushStatus) {
         setPushStatus(JSON.parse(savedPushStatus));
       }
-      
-      // Load today's execution logs from backend trade history
-      loadTodayExecutionLogs();
     } catch (err) {
       console.error('Failed to load saved dashboard data:', err);
     }
@@ -347,9 +352,12 @@ const OperationDashboardPage: React.FC = () => {
   };
 
   // Load today's execution logs from backend trade history
-  const loadTodayExecutionLogs = async () => {
+  const loadTodayExecutionLogs = async (tradeDate?: string) => {
     try {
-      const res = await fetch('/api/v1/portfolio/trades/today');
+      const url = tradeDate 
+        ? `/api/v1/portfolio/trades/today?date=${tradeDate}` 
+        : '/api/v1/portfolio/trades/today';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         const trades = data.items || [];
@@ -371,7 +379,7 @@ const OperationDashboardPage: React.FC = () => {
         setExecutionLogs(logs);
       }
     } catch (err) {
-      console.error('Failed to load today\'s execution logs:', err);
+      console.error('Failed to load execution logs:', err);
     }
   };
 
@@ -902,7 +910,9 @@ const OperationDashboardPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">操作指令看板</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            操作指令看板 {isV2 && (dashboardData as DashboardDataV2).trade_date && `(${(dashboardData as DashboardDataV2).trade_date}执行)`}
+          </h1>
           <p className="mt-1 text-sm text-secondary-text">
             {!isV2 && (dashboardData as DashboardDataV1).date}{!isV2 && (dashboardData as DashboardDataV1).time ? ` · ${(dashboardData as DashboardDataV1).time}` : ''}{dashboardData.generated_at ? ` · 生成于 ${dashboardData.generated_at}` : ''}
           </p>
