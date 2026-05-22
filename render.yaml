@@ -14,7 +14,30 @@ services:
       pip install --no-cache-dir -r requirements-render.txt
       # Build frontend
       cd apps/dsa-web && npm ci && npm run build
-    startCommand: python -m uvicorn server:app --host 0.0.0.0 --port $PORT
+    startCommand: |
+      # Run database migration before starting the service
+      python -c "
+import sqlite3, os
+from pathlib import Path
+db_path = Path(os.environ.get('DATABASE_PATH', '/var/data/stock_analysis.db'))
+if db_path.exists():
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    cursor.execute('PRAGMA table_info(conversation_session_meta)')
+    columns = [row[1] for row in cursor.fetchall()]
+    if 'sort_order' not in columns:
+        print('Adding sort_order column...')
+        cursor.execute('ALTER TABLE conversation_session_meta ADD COLUMN sort_order INTEGER')
+        conn.commit()
+        print('Migration completed')
+    else:
+        print('sort_order column already exists')
+    conn.close()
+else:
+    print('Database not found, skipping migration')
+"
+      # Start the application
+      python -m uvicorn server:app --host 0.0.0.0 --port $PORT
     pythonVersion: "3.12"
     
     # 环境变量（需要在 Render Dashboard 中配置敏感信息）
