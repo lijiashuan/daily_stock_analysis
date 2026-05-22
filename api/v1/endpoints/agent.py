@@ -264,6 +264,27 @@ async def update_chat_session_title(session_id: str, request: UpdateSessionTitle
     return {"success": True, "title": request.title}
 
 
+class UpdateSessionSortOrderRequest(BaseModel):
+    """Request body for updating chat session sort order."""
+    sort_order: int = Field(..., ge=0)
+
+
+@router.put("/chat/sessions/{session_id}/sort-order")
+async def update_chat_session_sort_order(session_id: str, request: UpdateSessionSortOrderRequest):
+    """更新指定会话的自定义排序顺序"""
+    from src.storage import get_db
+    success = get_db().update_conversation_session_sort_order(session_id, request.sort_order)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "session_not_found",
+                "message": f"Session {session_id} not found"
+            }
+        )
+    return {"success": True, "sort_order": request.sort_order}
+
+
 class SendChatRequest(BaseModel):
     """Request body for sending chat content to notification channels."""
 

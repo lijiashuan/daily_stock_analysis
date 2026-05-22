@@ -102,10 +102,6 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-secondary-text font-mono">
-                {item.stockCode}
-              </span>
-              <span className="w-1 h-1 rounded-full bg-subtle-hover" />
               <span className="text-[11px] text-muted-text">
                 {formatDateTime(item.createdAt)}
               </span>

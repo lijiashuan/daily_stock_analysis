@@ -327,6 +327,24 @@ const HomePage: React.FC = () => {
   }, [navigate, selectedReport]);
 
   const handleReanalyze = useCallback(() => {
+    // 优先使用勾选的股票
+    if (selectedHistoryIds.length > 0) {
+      // 从 historyItems 中找到第一个勾选的股票
+      const selectedItem = historyItems.find(item => selectedHistoryIds.includes(item.id));
+      if (selectedItem) {
+        void submitAnalysis({
+          stockCode: selectedItem.stockCode,
+          stockName: selectedItem.stockName,
+          originalQuery: selectedItem.stockCode,
+          selectionSource: 'manual',
+          forceRefresh: true,
+          skills: selectedAnalysisSkills,
+        });
+        return;
+      }
+    }
+
+    // 如果没有勾选，则使用当前查看的报告
     if (!selectedReport || selectedReport.meta.reportType === 'market_review') {
       return;
     }
@@ -339,7 +357,7 @@ const HomePage: React.FC = () => {
       forceRefresh: true,
       skills: selectedAnalysisSkills,
     });
-  }, [selectedAnalysisSkills, selectedReport, submitAnalysis]);
+  }, [selectedAnalysisSkills, selectedReport, selectedHistoryIds, historyItems, submitAnalysis]);
 
   const pollMarketReviewStatus = useCallback(
     async (taskId: string) => {

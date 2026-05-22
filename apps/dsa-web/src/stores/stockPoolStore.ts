@@ -126,20 +126,27 @@ async function fetchHistory(
       return null;
     }
 
+    // 按股票名称升序排序（中文拼音顺序）
+    const sortedItems = [...response.items].sort((a, b) => {
+      const nameA = a.stockName || a.stockCode || '';
+      const nameB = b.stockName || b.stockCode || '';
+      return nameA.localeCompare(nameB, 'zh-CN', { sensitivity: 'base' });
+    });
+
     if (silent && reset) {
       const existingIds = new Set(get().historyItems.map((item) => item.id));
-      const newItems = response.items.filter((item) => !existingIds.has(item.id));
+      const newItems = sortedItems.filter((item) => !existingIds.has(item.id));
       if (newItems.length > 0) {
         set({ historyItems: [...newItems, ...get().historyItems] });
       }
     } else if (reset) {
       set({
-        historyItems: response.items,
+        historyItems: sortedItems,
         currentPage: 1,
       });
     } else {
       set({
-        historyItems: [...get().historyItems, ...response.items],
+        historyItems: [...get().historyItems, ...sortedItems],
         currentPage: page,
       });
     }

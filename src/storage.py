@@ -608,6 +608,7 @@ class ConversationSessionMeta(Base):
     session_id = Column(String(100), unique=True, index=True, nullable=False)
     custom_title = Column(String(200), nullable=True)  # 用户自定义标题
     auto_title = Column(String(200), nullable=True)  # 系统自动生成的标题
+    sort_order = Column(Integer, nullable=True)  # 用户自定义排序顺序（越小越靠前）
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -2123,12 +2124,12 @@ class DatabaseManager:
                 # 优先使用自定义标题，如果没有则使用自动生成的标题
                 custom_title = None
                 meta = session.execute(
-                    select(ConversationSessionMeta.custom_title)
+                    select(ConversationSessionMeta.custom_title, ConversationSessionMeta.sort_order)
                     .where(ConversationSessionMeta.session_id == sid)
-                ).scalar_one_or_none()
+                ).one_or_none()
                 
                 if meta:
-                    custom_title = meta
+                    custom_title = meta.custom_title
                 
                 if custom_title:
                     title = custom_title
@@ -2147,13 +2148,19 @@ class DatabaseManager:
                     ).scalar()
                     title = (first_user_msg or "新对话")[:60]
 
-                results.append({
+                result_item = {
                     "session_id": sid,
                     "title": title,
                     "message_count": row.message_count,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "last_active": row.last_active.isoformat() if row.last_active else None,
-                })
+                }
+                
+                # 如果有排序顺序，添加到结果中
+                if meta and meta.sort_order is not None:
+                    result_item["sort_order"] = meta.sort_order
+                
+                results.append(result_item)
             return results
 
     def get_conversation_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
@@ -2238,6 +2245,68 @@ class DatabaseManager:
                 session.add(meta)
 
             return True
+
+    def update_conversation_session_sort_order(self, session_id: str, sort_order: int) -> bool:
+        """
+        更新会话的自定义排序顺序
+
+        Args:
+            session_id: 会话 ID
+            sort_order: 排序顺序（越小越靠前）
+
+        Returns:
+            True if updated, False if session not found
+        """
+        with self.session_scope() as session:
+            # 检查会话是否存在
+            exists = session.execute(
+                select(ConversationMessage.session_id)
+                .where(ConversationMessage.session_id == session_id)
+                .limit(1)
+            ).scalar()
+
+            if not exists:
+                return False
+
+            # 查找或创建元数据记录
+            meta = session.execute(
+                select(ConversationSessionMeta)
+                .where(ConversationSessionMeta.session_id == session_id)
+            ).scalar_one_or_none()
+
+            if meta:
+                meta.sort_order = sort_order
+                meta.updated_at = datetime.now()
+            else:
+                meta = ConversationSessionMeta(
+                    session_id=session_id,
+                    sort_order=sort_order
+                )
+                session.add(meta)
+
+            return True
+
+    def get_conversation_session_sort_orders(self, session_ids: List[str]) -> Dict[str, int]:
+        """
+        批量获取多个会话的排序顺序
+
+        Args:
+            session_ids: 会话 ID 列表
+
+        Returns:
+            {session_id: sort_order} 字典，不包含未设置的会话
+        """
+        if not session_ids:
+            return {}
+
+        with self.session_scope() as session:
+            rows = session.execute(
+                select(ConversationSessionMeta.session_id, ConversationSessionMeta.sort_order)
+                .where(ConversationSessionMeta.session_id.in_(session_ids))
+                .where(ConversationSessionMeta.sort_order.isnot(None))
+            ).all()
+
+            return {row.session_id: row.sort_order for row in rows}
 
     # ------------------------------------------------------------------
     # LLM usage tracking

@@ -42,6 +42,7 @@ export interface ChatSessionItem {
   message_count: number;
   created_at: string | null;
   last_active: string | null;
+  sort_order?: number;  // Optional custom sort order
 }
 
 export interface ChatSessionMessage {
@@ -75,6 +76,10 @@ export const agentApi = {
   },
   async updateChatSessionTitle(sessionId: string, title: string): Promise<{ success: boolean; title: string }> {
     const response = await apiClient.put<{ success: boolean; title: string }>(`/api/v1/agent/chat/sessions/${sessionId}/title`, { title });
+    return response.data;
+  },
+  async updateChatSessionSortOrder(sessionId: string, sortOrder: number): Promise<{ success: boolean; sort_order: number }> {
+    const response = await apiClient.put<{ success: boolean; sort_order: number }>(`/api/v1/agent/chat/sessions/${sessionId}/sort-order`, { sort_order: sortOrder });
     return response.data;
   },
   async sendChat(content: string): Promise<{ success: boolean }> {
