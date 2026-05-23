@@ -52,6 +52,7 @@ const QUICK_QUESTIONS = [
   { label: '箱体震荡技能看中芯国际', skill: 'box_oscillation' },
   { label: '分析腾讯 hk00700', skill: 'bull_trend' },
   { label: '用情绪周期分析东方财富', skill: 'emotion_cycle' },
+  { label: '尾盘选股看贵州茅台', skill: 'tail_session_selection' },
 ];
 
 const MAX_SELECTED_SKILLS = 3;

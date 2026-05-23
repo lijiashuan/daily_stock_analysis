@@ -1,0 +1,77 @@
+# Tail Session Stock Selection Strategy / 尾盘选股策略
+# Identifies stocks with strong momentum near market close for next-day opportunities.
+
+name: tail_session_selection
+display_name: 尾盘选股
+description: 识别收盘前强势股，捕捉次日延续性机会。适用于14:30-15:00时段的选股决策。
+category: pattern
+core_rules: [2, 3, 6]
+required_tools:
+  - get_realtime_quote
+  - get_daily_history
+  - analyze_trend
+aliases: [尾盘, 尾盘选股, 收盘选股, 尾盘买入]
+default_active: false
+default_router: true
+default_priority: 70
+market_regimes: [trending_up, sideways]
+
+instructions: |
+  **尾盘选股策略（Tail Session Stock Selection）**
+
+  适用场景：
+  - 在交易日尾盘时段（14:30-15:00）进行选股决策。
+  - 寻找当日强势且有望在次日延续上涨的股票。
+  - 避免盘中追高，利用尾盘确定性更高的时机介入。
+
+  分析框架：
+
+  1. **尾盘时段确认**
+     - 使用 `get_realtime_quote` 获取当前时间和实时行情。
+     - 仅在14:30之后执行此策略效果最佳。
+     - 若时间过早，提示用户等待尾盘时段或改用其他策略。
+
+  2. **当日强势确认**
+     - 使用 `get_realtime_quote` 检查当日涨跌幅。
+     - 优选涨幅在 3%-7% 区间的股票（避免涨停无法买入或涨幅过大风险）。
+     - 量比 > 1.2，说明有持续的资金关注。
+
+  3. **趋势结构验证**
+     - 使用 `analyze_trend` 确认MA5/MA10/MA20多头排列。
+     - 优先选择股价站在MA5上方的标的。
+     - MA20方向向上为佳，确保中期趋势不弱。
+
+  4. **尾盘形态识别**
+     - 使用 `get_daily_history` 查看最近5日K线。
+     - 优选"尾盘拉升"形态：最后30分钟价格逐步走高。
+     - 避免"尾盘跳水"：最后30分钟明显回落的标的。
+     - 日内分时图应呈现"震荡上行"或"横盘后突破"。
+
+  5. **量能配合**
+     - 当日成交量较前5日均量放大 20%-80% 为佳。
+     - 避免巨量（>200%）可能意味着分歧过大。
+     - 缩量上涨需谨慎，可能是动能不足。
+
+  6. **位置与空间**
+     - 股价距离上方阻力位应有至少 3%-5% 的空间。
+     - 避免在重要压力位附近追入。
+     - 优先选择刚突破关键位置或回踩企稳的标的。
+
+  7. **风险控制**
+     - 止损位设在当日低点或MA10下方。
+     - 次日若低开超过 -2%，需警惕判断失误。
+     - 尾盘选股的持仓周期通常为1-3个交易日。
+
+  评分调整建议：
+  - 尾盘强势 + 多头排列：`sentiment_score +15`
+  - 量价配合理想（放量20%-80%）：`sentiment_score +10`
+  - 刚突破关键阻力位：`sentiment_score +8`
+  - 尾盘出现回落迹象：`sentiment_score -10`
+  - 乖离率过大（>8%）：`sentiment_score -8`
+  - 上方空间不足（<3%）：`sentiment_score -5`
+
+  交易建议输出：
+  - 明确给出"可介入/观望/放弃"的判断。
+  - 注明次日观察要点（如开盘强弱、量能延续性）。
+  - 必须给出明确的止损参考价位。
+  - 若尾盘时段未到或条件不满足，建议等待或改用其他策略。
