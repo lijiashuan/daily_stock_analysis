@@ -226,6 +226,7 @@ const ChatPage: React.FC = () => {
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+  const [sendingMessageIds, setSendingMessageIds] = useState<Set<string>>(new Set());
   const [copiedMessages, setCopiedMessages] = useState<Set<string>>(new Set());
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [exportingMessageId, setExportingMessageId] = useState<string | null>(null);
@@ -798,6 +799,62 @@ const ChatPage: React.FC = () => {
     }
   }, [sessionId, messages]);
 
+  const formatSingleMessageAsMarkdown = useCallback((msg: Message): string => {
+    const skillLabel = getMessageSkillLabel(msg);
+    const now = new Date();
+    const timeStr = now.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const lines: string[] = [
+      '# 单条消息',
+      '',
+      `生成时间: ${timeStr}`,
+      '',
+    ];
+
+    const heading = msg.role === 'user' ? '## 用户' : '## AI';
+    if (msg.role === 'assistant' && skillLabel) {
+      lines.push(`${heading} (${skillLabel})`);
+    } else {
+      lines.push(heading);
+    }
+    lines.push('');
+    lines.push(msg.content);
+    lines.push('');
+
+    return lines.join('\n');
+  }, []);
+
+  const handleSendMessage = useCallback(async (msg: Message) => {
+    if (sendingMessageIds.has(msg.id)) return;
+    
+    setSendingMessageIds(prev => new Set(prev).add(msg.id));
+    setSendToast(null);
+    
+    try {
+      const content = formatSingleMessageAsMarkdown(msg);
+      await agentApi.sendChat(content);
+      showSendFeedback({ type: 'success', message: '已发送到通知渠道' }, 3000);
+    } catch (err) {
+      const parsed = getParsedApiError(err);
+      showSendFeedback({
+        type: 'error',
+        message: parsed.message || '发送失败',
+      }, 5000);
+    } finally {
+      setSendingMessageIds(prev => {
+        const next = new Set(prev);
+        next.delete(msg.id);
+        return next;
+      });
+    }
+  }, [sendingMessageIds, formatSingleMessageAsMarkdown, showSendFeedback]);
+
   const getCurrentStage = (steps: ProgressStep[]): string => {
     if (steps.length === 0) return '正在连接...';
     const last = steps[steps.length - 1];
@@ -1304,6 +1361,35 @@ const ChatPage: React.FC = () => {
                           >
                             {copiedMessages.has(msg.id) ? text.copied : text.copy}
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSendMessage(msg)}
+                            className="chat-copy-btn"
+                            disabled={sendingMessageIds.has(msg.id)}
+                            aria-label="发送此条AI消息到通知渠道"
+                          >
+                            {sendingMessageIds.has(msg.id) ? (
+                              <svg
+                                className="w-3 h-3 animate-spin"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle
+                                  className="opacity-25"
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  stroke="currentColor"
+                                  strokeWidth="4"
+                                />
+                                <path
+                                  className="opacity-75"
+                                  fill="currentColor"
+                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                />
+                              </svg>
+                            ) : ('发送')}
+                          </button>
                           <div className="relative">
                             <button
                               type="button"
@@ -1382,28 +1468,77 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        {/* Display image if present */}
-                        {msg.imageData && (
-                          <div className="mb-2">
-                            <img
-                              src={msg.imageData}
-                              alt="Uploaded"
-                              className="max-h-48 max-w-full rounded-lg border border-border"
-                            />
-                          </div>
-                        )}
-                        {/* Display text content */}
-                        {msg.content
-                          .split('\n')
-                          .map((line, i) => (
-                            <p
-                              key={i}
-                              className="mb-1 last:mb-0 leading-relaxed"
+                      <div className="relative">
+                        <div className="chat-message-actions">
+                          <Tooltip content="发送到已配置的通知机器人/邮箱">
+                            <button
+                              type="button"
+                              onClick={() => handleSendMessage(msg)}
+                              className="chat-copy-btn"
+                              disabled={sendingMessageIds.has(msg.id)}
+                              aria-label="发送此条消息到通知渠道"
                             >
-                              {line || '\u00A0'}
-                            </p>
-                          ))}
+                              {sendingMessageIds.has(msg.id) ? (
+                                <svg
+                                  className="w-3 h-3 animate-spin"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <circle
+                                    className="opacity-25"
+                                    cx="12"
+                                    cy="12"
+                                    r="10"
+                                    stroke="currentColor"
+                                    strokeWidth="4"
+                                  />
+                                  <path
+                                    className="opacity-75"
+                                    fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                  />
+                                </svg>
+                              ) : (
+                                <svg
+                                  className="w-3 h-3"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                                  />
+                                </svg>
+                              )}
+                            </button>
+                          </Tooltip>
+                        </div>
+                        <div className="space-y-2">
+                          {/* Display image if present */}
+                          {msg.imageData && (
+                            <div className="mb-2">
+                              <img
+                                src={msg.imageData}
+                                alt="Uploaded"
+                                className="max-h-48 max-w-full rounded-lg border border-border"
+                              />
+                            </div>
+                          )}
+                          {/* Display text content */}
+                          {msg.content
+                            .split('\n')
+                            .map((line, i) => (
+                              <p
+                                key={i}
+                                className="mb-1 last:mb-0 leading-relaxed"
+                              >
+                                {line || '\u00A0'}
+                              </p>
+                            ))}
+                        </div>
                       </div>
                     )}
                   </div>

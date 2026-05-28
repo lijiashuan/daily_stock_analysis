@@ -16,6 +16,7 @@ interface MarketIndexes {
 }
 
 interface OrderTrigger {
+  id: string;
   type: string;
   value: number;
 }
@@ -1409,9 +1410,11 @@ const OperationDashboardPage: React.FC = () => {
                           <p className="font-medium text-foreground">{pos.weight_pct != null ? pos.weight_pct.toFixed(1) : '-'}%</p>
                         </div>
                       </div>
-                      <div className="mt-2 flex items-center gap-4 text-xs text-secondary-text">
-                        <span className="text-red-600 dark:text-red-400">止损 ¥{pos.stop_loss}</span>
-                      </div>
+                      {pos.stop_loss != null && (
+                        <div className="mt-2 flex items-center gap-4 text-xs text-secondary-text">
+                          <span className="text-red-600 dark:text-red-400">止损 ¥{pos.stop_loss}</span>
+                        </div>
+                      )}
                       <p className="mt-2 text-sm text-foreground">{pos.note}</p>
                     </div>
                   </div>
