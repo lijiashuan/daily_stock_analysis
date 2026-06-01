@@ -834,18 +834,17 @@ def main() -> int:
         if args.port == 8000 and os.getenv('WEBUI_PORT'):
             args.port = int(os.getenv('WEBUI_PORT'))
 
-    bot_clients_started = False
     if start_serve:
+        # 在启动 API 服务之前先启动 bot stream 客户端
+        # 这样飞书/钉钉机器人可以与 WebUI 同时运行
+        start_bot_stream_clients(config)
+        
         if not prepare_webui_frontend_assets():
             logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
         try:
             start_api_server(host=args.host, port=args.port, config=config)
-            bot_clients_started = True
         except Exception as e:
             logger.error(f"启动 FastAPI 服务失败: {e}")
-
-    if bot_clients_started:
-        start_bot_stream_clients(config)
 
     # === 仅 Web 服务模式：不自动执行分析 ===
     if args.serve_only:
