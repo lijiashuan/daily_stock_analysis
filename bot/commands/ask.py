@@ -238,7 +238,11 @@ class AskCommand(BotCommand):
 
             executor = build_agent_executor(config, skills=[skill_id] if skill_id else None)
             user_msg = self._build_user_message(code, skill_id, skill_text)
-            session_id = f"{message.platform}_{message.user_id}:ask_{code}_{uuid.uuid4()}"
+            # 优先使用消息中指定的会话ID，否则使用默认逻辑生成
+            if hasattr(message, 'session_id') and message.session_id:
+                session_id = message.session_id
+            else:
+                session_id = f"{message.platform}_{message.user_id}:ask_{code}_{uuid.uuid4()}"
             result = executor.chat(
                 message=user_msg,
                 session_id=session_id,
@@ -284,7 +288,7 @@ class AskCommand(BotCommand):
                 executor = build_agent_executor(config, skills=[skill_id] if skill_id else None)
                 user_msg = self._build_user_message(stock_code, skill_id, skill_text)
                 session_id = f"{platform}_{user_id}:ask_{stock_code}_{uuid.uuid4()}"
-                conversation_manager.add_message(session_id, "user", user_msg)
+                conversation_manager.add_message(session_id, "user", user_msg, message.message_id)
 
                 result = executor.run(
                     task=user_msg,
@@ -293,7 +297,7 @@ class AskCommand(BotCommand):
                 if result.success or self._should_accept_fallback_content(result):
                     dashboard = result.dashboard if isinstance(result.dashboard, dict) else None
                     formatted_analysis = self._format_stock_result(stock_code, dashboard, result.content)
-                    conversation_manager.add_message(session_id, "assistant", formatted_analysis)
+                    conversation_manager.add_message(session_id, "assistant", formatted_analysis, message.message_id)
                     return (
                         stock_code,
                         {
@@ -310,7 +314,7 @@ class AskCommand(BotCommand):
                     )
 
                 error_note = f"[分析失败] {result.error or '未知错误'}"
-                conversation_manager.add_message(session_id, "assistant", error_note)
+                conversation_manager.add_message(session_id, "assistant", error_note, message.message_id)
                 return (stock_code, None, result.error or "未知错误")
             except Exception as exc:
                 return (stock_code, None, str(exc))

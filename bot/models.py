@@ -49,6 +49,7 @@ class BotMessage:
         mentions: @的用户列表
         timestamp: 消息时间戳
         raw_data: 原始请求数据（平台特定，用于调试）
+        session_id: 会话 ID（可选，用于指定特定会话）
     """
     platform: str
     message_id: str
@@ -62,6 +63,7 @@ class BotMessage:
     mentions: List[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
     raw_data: Dict[str, Any] = field(default_factory=dict)
+    session_id: Optional[str] = None
     
     def get_command_and_args(self, prefix: str = "/") -> tuple:
         """
@@ -79,6 +81,8 @@ class BotMessage:
         # 检查是否以命令前缀开头
         if not text.startswith(prefix):
             # 尝试匹配中文命令（无前缀）
+            # 注意：只匹配明确的命令格式（如 "分析 600519" 或 "分析600519"）
+            # 避免把自然语言请求误识别为命令
             chinese_commands = {
                 '分析': 'analyze',
                 '大盘': 'market',
@@ -88,8 +92,17 @@ class BotMessage:
             }
             for cn_cmd, en_cmd in chinese_commands.items():
                 if text.startswith(cn_cmd):
-                    args = text[len(cn_cmd):].strip().split()
-                    return en_cmd, args
+                    # 提取命令后的内容
+                    remaining = text[len(cn_cmd):].strip()
+                    # 只有当命令后紧跟参数（如股票代码）时才认为是命令
+                    # 如果是自然语言描述（如"分析一下今天的大盘"），则不匹配为命令
+                    if remaining:
+                        # 检查是否是明确的参数格式（股票代码或命令参数）
+                        # 如果剩余内容以空格或数字开头，则认为是命令参数
+                        first_char = remaining[0]
+                        if first_char.isspace() or first_char.isdigit() or first_char == '-':
+                            args = remaining.split()
+                            return en_cmd, args
             return None, []
         
         # 去除前缀

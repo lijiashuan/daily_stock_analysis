@@ -442,17 +442,23 @@ User: "analyze TSLA and NVDA using trend strategy"
 
     @classmethod
     def _passes_nl_prefilter(cls, text: str) -> bool:
-        """Return whether the message is worth the LLM intent-routing cost."""
-        if cls._NL_PREFILTER.search(text):
-            return True
-
+        """Return whether the message is worth the LLM intent-routing cost.
+        
+        放宽预过滤规则，允许更多自然语言消息通过，交由AI进行意图判断。
+        这样可以保持与WebUI一致的用户体验。
+        """
         stripped = (text or "").strip()
-        if " " in stripped or len(stripped) > 10:
+        
+        # 空消息直接拒绝
+        if not stripped:
             return False
-
-        from src.agent.orchestrator import _extract_stock_code
-
-        return bool(_extract_stock_code(stripped))
+        
+        # 长度限制（防止滥用）
+        if len(stripped) > 500:
+            return False
+        
+        # ✅ 允许所有非空、长度合理的消息通过，交给AI判断
+        return True
 
     async def _try_nl_routing(self, message: BotMessage) -> Optional[BotResponse]:
         """Route a non-command message to the appropriate command via LLM intent parsing.

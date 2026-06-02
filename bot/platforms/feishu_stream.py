@@ -572,6 +572,19 @@ class FeishuStreamClient:
         """创建消息处理函数"""
 
         def handle_message(message: BotMessage) -> BotResponse:
+            # 添加飞书传送标签
+            try:
+                from bot.handlers.feishu_tag_handler import get_feishu_tag_handler
+                tag_handler = get_feishu_tag_handler()
+                message = tag_handler.process_message(message)
+            except Exception as e:
+                logger.error(f"[Feishu Stream] 标签处理失败: {e}")
+            
+            # 修改消息的会话ID，让所有飞书消息使用统一会话ID
+            # 这样所有飞书消息都会在同一个会话中连续显示
+            # 使用统一的会话ID，确保所有飞书消息都进入同一会话
+            message.session_id = "feishu_unified_chat"
+            
             from bot.dispatcher import get_dispatcher
             dispatcher = get_dispatcher()
             return dispatcher.dispatch(message)

@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 from typing import Optional
 from bot.models import BotMessage
+from src.tags_manager import TagsManager
 
 class FeishuTagHandler:
     def __init__(self):
         self.tag_name = "飞书传送"
+        self.tags_manager = TagsManager()
     
     def process_message(self, message: BotMessage) -> BotMessage:
         try:
@@ -12,6 +14,13 @@ class FeishuTagHandler:
                 message.tags = []
             if self.tag_name not in message.tags:
                 message.tags.append(self.tag_name)
+            if message.message_id:
+                self.tags_manager.assign_tag_to_message(
+                    tag_name=self.tag_name,
+                    message_id=message.message_id,
+                    platform=message.platform,
+                    description="Feishu message auto tag"
+                )
             return message
         except Exception as e:
             import logging

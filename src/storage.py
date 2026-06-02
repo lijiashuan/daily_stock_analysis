@@ -2031,9 +2031,12 @@ class DatabaseManager:
         digest = hashlib.md5(raw_key.encode("utf-8")).hexdigest()
         return f"no-url:{code}:{digest}"
 
-    def save_conversation_message(self, session_id: str, role: str, content: str) -> None:
+    def save_conversation_message(self, session_id: str, role: str, content: str) -> int:
         """
         保存 Agent 对话消息
+        
+        Returns:
+            保存的消息的数据库ID
         """
         with self.session_scope() as session:
             msg = ConversationMessage(
@@ -2042,6 +2045,10 @@ class DatabaseManager:
                 content=content
             )
             session.add(msg)
+            session.flush()  # 获取ID但不提交事务
+            message_db_id = msg.id
+            session.commit()  # 提交事务
+            return message_db_id
 
     def get_conversation_history(self, session_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
@@ -2086,7 +2093,7 @@ class DatabaseManager:
         Returns:
             按最近活跃时间倒序的会话列表，每条包含 session_id, title, message_count, last_active
         """
-        from sqlalchemy import func
+        from sqlalchemy import func, and_, or_, String
 
         with self.session_scope() as session:
             normalized_prefix = None
@@ -2134,19 +2141,72 @@ class DatabaseManager:
                 if custom_title:
                     title = custom_title
                 else:
-                    # 取该会话第一条 user 消息作为标题
-                    first_user_msg = session.execute(
-                        select(ConversationMessage.content)
-                        .where(
-                            and_(
-                                ConversationMessage.session_id == sid,
-                                ConversationMessage.role == "user",
+                    # 特殊处理飞书统一聊天会话：显示为"飞书传送"
+                    if sid == "feishu_unified_chat":
+                        title = "飞书传送"
+                    else:
+                        # 取该会话第一条 user 消息作为标题
+                        first_user_msg = session.execute(
+                            select(ConversationMessage.content)
+                            .where(
+                                and_(
+                                    ConversationMessage.session_id == sid,
+                                    ConversationMessage.role == "user",
+                                )
                             )
-                        )
-                        .order_by(ConversationMessage.created_at)
-                        .limit(1)
-                    ).scalar()
-                    title = (first_user_msg or "新对话")[:60]
+                            .order_by(ConversationMessage.created_at)
+                            .limit(1)
+                        ).scalar()
+                        title = (first_user_msg or "新对话")[:60]
+
+                # 检查该会话是否有"飞书传送"标签的消息
+                has_feishu_tag = False
+                try:
+                    # 检查会话ID是否以feishu_开头，这是一个强信号表明这是飞书会话
+                    if sid.startswith('feishu_'):
+                        has_feishu_tag = True
+                    else:
+                        # 否则，检查该会话中是否存在带"飞书传送"标签的消息
+                        # 这里需要检查TagAssignment表中是否有关联到该会话的标签
+                        from src.tags_manager import TagAssignment
+                        from sqlalchemy import Table, MetaData
+                        
+                        # 在当前会话中直接查询标签ID，避免跨会话引用对象
+                        feishu_tag_id_result = session.execute(
+                            text("SELECT id FROM tags WHERE name = :tag_name"),
+                            {"tag_name": "飞书传送"}
+                        ).fetchone()
+                        
+                        if feishu_tag_id_result:
+                            feishu_tag_id = feishu_tag_id_result[0]
+                            
+                            feishu_tag_check = session.execute(
+                                select(func.count(TagAssignment.id))
+                                .where(
+                                    and_(
+                                        # 检查是否在该会话中存在带"飞书传送"标签的消息
+                                        TagAssignment.tag_id == feishu_tag_id,
+                                        # 确定该消息属于当前会话
+                                        TagAssignment.message_id.in_(
+                                            select(ConversationMessage.id.cast(String))
+                                            .where(ConversationMessage.session_id == sid)
+                                        )
+                                    )
+                                )
+                            ).scalar()
+                            
+                            if feishu_tag_check and feishu_tag_check > 0:
+                                has_feishu_tag = True
+                except Exception as e:
+                    # 如果tags表不存在或有其他问题，忽略错误
+                    # 但如果是飞书会话，仍然显示标识
+                    if sid.startswith('feishu_'):
+                        has_feishu_tag = True
+
+                # 如果有飞书标签，在标题前添加标识
+                # 但对统一聊天会话不重复添加前缀
+                if has_feishu_tag and sid != "feishu_unified_chat":
+                    title = f"[飞书传送] {title}"
 
                 result_item = {
                     "session_id": sid,
@@ -2161,7 +2221,8 @@ class DatabaseManager:
                     result_item["sort_order"] = meta.sort_order
                 
                 results.append(result_item)
-            return results
+        
+        return results
 
     def get_conversation_messages(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """

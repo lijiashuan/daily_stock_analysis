@@ -89,7 +89,11 @@ class ChatCommand(BotCommand):
             )
             
         user_message = " ".join(args)
-        session_id = _resolve_chat_session_id(message)
+        # 优先使用消息中指定的会话ID，否则使用默认逻辑生成
+        if hasattr(message, 'session_id') and message.session_id:
+            session_id = message.session_id
+        else:
+            session_id = _resolve_chat_session_id(message)
         
         try:
             from src.agent.factory import build_agent_executor

@@ -595,6 +595,13 @@ class AgentExecutor:
 
         result = self._run_loop(messages, tool_decls, parse_dashboard=False, progress_callback=progress_callback)
 
+        # 为AI回复添加时间戳（在返回给用户之前）
+        from datetime import datetime
+        current_time = datetime.now().strftime("%Y年%m月%d日%H时%M分")
+        if result.success:
+            # 在AI回复内容前添加时间戳
+            result.content = f"（{current_time}）AI回复：{result.content}"
+
         # Persist assistant reply (or error note) for context continuity
         if result.success:
             conversation_manager.add_message(session_id, "assistant", result.content)
