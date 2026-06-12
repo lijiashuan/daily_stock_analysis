@@ -492,8 +492,11 @@ User: "analyze TSLA and NVDA using trend strategy"
             return None
 
         text = message.content.strip()
-        if not text or len(text) > 500:
+        if not text:
             return None
+        if len(text) > 500:
+            logger.info("[Dispatcher] NL routing: text truncated from %d to 500 chars", len(text))
+            text = text[:500]
 
         # Layer 1: cheap pre-filter — skip obviously irrelevant messages
         if not self._passes_nl_prefilter(text):
@@ -535,6 +538,8 @@ User: "analyze TSLA and NVDA using trend strategy"
             args = [code_str]
             if strategy:
                 args.append(strategy)
+            # Pass original user text as well, so Agent gets full context
+            args.append(text)
 
             logger.info(
                 "[Dispatcher] NL routing → /ask %s (strategy=%s, text=%s)",
@@ -560,8 +565,11 @@ User: "analyze TSLA and NVDA using trend strategy"
             return None
 
         text = message.content.strip()
-        if not text or len(text) > 500:
+        if not text:
             return None
+        if len(text) > 500:
+            logger.info("[Dispatcher] NL routing: text truncated from %d to 500 chars", len(text))
+            text = text[:500]
 
         if not self._passes_nl_prefilter(text):
             return None
@@ -598,12 +606,25 @@ User: "analyze TSLA and NVDA using trend strategy"
             args = [code_str]
             if strategy:
                 args.append(strategy)
+            # Pass original user text as well, so Agent gets full context
+            args.append(text)
 
             logger.info(
                 "[Dispatcher] NL routing → /ask %s (strategy=%s, text=%s)",
                 code_str, strategy, text[:60],
             )
             return ask_cmd.execute(message, args)
+
+        if intent == "analysis":
+            # "analysis" intent but no stock codes could be resolved
+            # (e.g. "分析我的持仓") → fallback to chat mode
+            logger.info(
+                "[Dispatcher] NL routing → /chat (analysis fallback, no codes): %s",
+                text[:60],
+            )
+            chat_cmd = self.get_command("chat")
+            if chat_cmd:
+                return chat_cmd.execute(message, [text])
 
         return None
 
@@ -627,7 +648,7 @@ User: "analyze TSLA and NVDA using trend strategy"
             )
             return CommandDispatcher._parse_intent_payload(resp.content or "")
         except Exception as exc:
-            logger.debug("[Dispatcher] NL parse LLM call failed: %s", exc)
+            logger.warning("[Dispatcher] NL parse LLM call failed: %s", exc)
             return None
 
     @staticmethod
@@ -649,7 +670,7 @@ User: "analyze TSLA and NVDA using trend strategy"
             )
             return CommandDispatcher._parse_intent_payload(resp.content or "")
         except Exception as exc:
-            logger.debug("[Dispatcher] NL parse LLM call failed: %s", exc)
+            logger.warning("[Dispatcher] NL parse LLM call failed: %s", exc)
             return None
 
     @staticmethod

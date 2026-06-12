@@ -57,8 +57,8 @@ class ConversationSession:
         self.last_active = datetime.now()
 
     def get_history(self) -> List[Dict[str, Any]]:
-        """Get message history."""
-        messages = get_db().get_conversation_history(self.session_id)
+        """Get message history (up to 50 recent messages)."""
+        messages = get_db().get_conversation_history(self.session_id, limit=50)
         return messages
 
 class ConversationManager:

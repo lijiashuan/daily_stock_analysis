@@ -196,11 +196,15 @@ class AskCommand(BotCommand):
 
     @staticmethod
     def _build_user_message(stock_code: str, skill_id: str, skill_text: str) -> str:
+        # If NL routing passed the full original user message, use it directly
+        if skill_text and stock_code in skill_text and len(skill_text) > 20:
+            return skill_text
         user_msg = f"请分析股票 {stock_code}"
         if skill_id:
             user_msg = f"请使用 {skill_id} 技能分析股票 {stock_code}"
-        if skill_text:
-            user_msg = f"请分析股票 {stock_code}，{skill_text}"
+        # Only append skill_text if it adds meaningful context (not just the code repeated)
+        if skill_text and skill_text.strip() != stock_code and len(skill_text) > 2:
+            user_msg = f"{user_msg}，{skill_text}"
         return user_msg
 
     def execute(self, message: BotMessage, args: List[str]) -> BotResponse:

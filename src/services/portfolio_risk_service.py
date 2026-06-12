@@ -14,6 +14,28 @@ from src.services.portfolio_service import PortfolioService
 class PortfolioRiskService:
     """Compute portfolio risk blocks on top of replayed snapshot data."""
 
+    # Persistent board cache — avoid redundant efinance API calls on every
+    # Web UI refresh.  Board membership changes at most once per quarter.
+    _board_cache: Dict[Tuple[str, str], str] = {}
+    _board_cache_date: Optional[str] = None
+    _board_cache_dirty: bool = False
+
+    @classmethod
+    def invalidate_board_cache(cls) -> None:
+        """Mark board cache as dirty so next risk-report query re-fetches.
+
+        Call this when trade events are recorded (new/modified positions)
+        or after market close so the cache is refreshed naturally.
+        """
+        cls._board_cache_dirty = True
+
+    @classmethod
+    def clear_board_cache(cls) -> None:
+        """Force immediate clear of the board cache (e.g. on config change)."""
+        cls._board_cache.clear()
+        cls._board_cache_date = None
+        cls._board_cache_dirty = False
+
     def __init__(
         self,
         *,
@@ -217,7 +239,13 @@ class PortfolioRiskService:
             "failed_count": 0,
         }
         errors: List[str] = []
-        board_cache: Dict[Tuple[str, str], str] = {}
+        today_str = as_of_date.isoformat()
+
+        # Use shared class-level cache, refresh only on new date or explicit invalidation
+        if self._board_cache_date != today_str or self._board_cache_dirty:
+            PortfolioRiskService._board_cache.clear()
+            PortfolioRiskService._board_cache_date = today_str
+            PortfolioRiskService._board_cache_dirty = False
 
         for account in snapshot.get("accounts", []):
             for pos in account.get("positions", []):
@@ -238,7 +266,7 @@ class PortfolioRiskService:
                 sector = self._resolve_primary_sector(
                     symbol=symbol,
                     market=market,
-                    board_cache=board_cache,
+                    board_cache=PortfolioRiskService._board_cache,
                     coverage=coverage,
                     errors=errors,
                 )

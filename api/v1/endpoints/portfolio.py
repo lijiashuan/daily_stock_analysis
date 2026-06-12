@@ -205,6 +205,8 @@ def create_trade(request: PortfolioTradeCreateRequest) -> PortfolioEventCreatedR
             trade_uid=request.trade_uid,
             note=request.note,
         )
+        # Invalidate board cache so risk report picks up new exposure
+        PortfolioRiskService.invalidate_board_cache()
         return PortfolioEventCreatedResponse(**data)
     except PortfolioBusyError as exc:
         raise _conflict_error(error="portfolio_busy", message=str(exc))
@@ -296,6 +298,7 @@ def delete_trade(trade_id: int) -> PortfolioDeleteResponse:
                 status_code=404,
                 detail={"error": "not_found", "message": f"Trade not found: {trade_id}"},
             )
+        PortfolioRiskService.invalidate_board_cache()
         return PortfolioDeleteResponse(deleted=1)
     except PortfolioBusyError as exc:
         raise _conflict_error(error="portfolio_busy", message=str(exc))
@@ -633,6 +636,7 @@ def commit_csv_import(
         if result.get('errors'):
             logger.error(f"Commit errors: {result['errors'][:10]}")
         
+        PortfolioRiskService.invalidate_board_cache()
         return PortfolioImportCommitResponse(**result)
     except ValueError as exc:
         raise _bad_request(exc)
