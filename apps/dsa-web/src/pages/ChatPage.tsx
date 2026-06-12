@@ -14,7 +14,7 @@ import {
   type Message,
   type ProgressStep,
 } from '../stores/agentChatStore';
-import { formatSessionAsMarkdown, downloadSessionInFormat } from '../utils/chatExport';
+import { downloadSessionInFormat } from '../utils/chatExport';
 import type { ChatFollowUpContext } from '../utils/chatFollowUp';
 import {
   buildFollowUpPrompt,
@@ -220,7 +220,6 @@ const ChatPage: React.FC = () => {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sending, setSending] = useState(false);
   const [isFollowUpContextLoading, setIsFollowUpContextLoading] = useState(false);
   const [sendToast, setSendToast] = useState<{
     type: 'success' | 'error';
@@ -1176,71 +1175,7 @@ const ChatPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <Tooltip content="发送到已配置的通知机器人/邮箱">
-                  <span className="inline-flex">
-                    <Button
-                      variant="action-primary"
-                      size="sm"
-                      disabled={sending}
-                      onClick={async () => {
-                        if (sending) return;
-                        setSending(true);
-                        setSendToast(null);
-                        try {
-                          const content = formatSessionAsMarkdown(messages);
-                          await agentApi.sendChat(content);
-                          showSendFeedback({ type: 'success', message: '已发送到通知渠道' }, 3000);
-                        } catch (err) {
-                          const parsed = getParsedApiError(err);
-                          showSendFeedback({
-                            type: 'error',
-                            message: parsed.message || '发送失败',
-                          }, 5000);
-                        } finally {
-                          setSending(false);
-                        }
-                      }}
-                      aria-label="发送到已配置的通知机器人/邮箱"
-                    >
-                      {sending ? (
-                        <svg
-                          className="w-4 h-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                          />
-                        </svg>
-                      ) : (
-                        <svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                          />
-                        </svg>
-                      )}
-                      发送
-                    </Button>
-                  </span>
-                </Tooltip>
+                
               </div>
             )}
           </div>
@@ -1468,55 +1403,7 @@ const ChatPage: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      <div className="relative">
-                        <div className="chat-message-actions">
-                          <Tooltip content="发送到已配置的通知机器人/邮箱">
-                            <button
-                              type="button"
-                              onClick={() => handleSendMessage(msg)}
-                              className="chat-copy-btn"
-                              disabled={sendingMessageIds.has(msg.id)}
-                              aria-label="发送此条消息到通知渠道"
-                            >
-                              {sendingMessageIds.has(msg.id) ? (
-                                <svg
-                                  className="w-3 h-3 animate-spin"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <circle
-                                    className="opacity-25"
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="4"
-                                  />
-                                  <path
-                                    className="opacity-75"
-                                    fill="currentColor"
-                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                  />
-                                </svg>
-                              ) : (
-                                <svg
-                                  className="w-3 h-3"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                  />
-                                </svg>
-                              )}
-                            </button>
-                          </Tooltip>
-                        </div>
-                        <div className="space-y-2">
+                      <div className="space-y-2">
                           {/* Display image if present */}
                           {msg.imageData && (
                             <div className="mb-2">
@@ -1539,7 +1426,6 @@ const ChatPage: React.FC = () => {
                               </p>
                             ))}
                         </div>
-                      </div>
                     )}
                   </div>
                 </div>
