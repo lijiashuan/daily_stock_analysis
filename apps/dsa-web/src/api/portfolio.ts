@@ -338,12 +338,27 @@ export const portfolioApi = {
 
 
   async getNote(query: { accountId: number; symbol: string; costMethod?: string }) {
-    const response = await apiClient.get('/api/v1/portfolio/note', { params: query });
+    const params: Record<string, string | number> = {
+      account_id: query.accountId,
+      symbol: query.symbol,
+    };
+    if (query.costMethod) {
+      params.cost_method = query.costMethod;
+    }
+    const response = await apiClient.get('/api/v1/portfolio/note', { params });
     return toCamelCase(response.data);
   },
 
   async saveNote(body: { accountId: number; symbol: string; costMethod?: string; content: string }) {
-    const response = await apiClient.put('/api/v1/portfolio/note', body);
+    const payload: Record<string, unknown> = {
+      account_id: body.accountId,
+      symbol: body.symbol,
+      content: body.content,
+    };
+    if (body.costMethod) {
+      payload.cost_method = body.costMethod;
+    }
+    const response = await apiClient.put('/api/v1/portfolio/note', payload);
     return toCamelCase(response.data);
   },
 };

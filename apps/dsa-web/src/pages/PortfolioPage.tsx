@@ -879,7 +879,10 @@ const PortfolioPage: React.FC = () => {
       const localVal = localStorage.getItem(localKey);
       if (localVal) {
         setStockNotes(prev => ({ ...prev, [symbol]: localVal }));
-        handleSaveNote(symbol, true);
+        const accountId = selectedAccount === 'all' ? (accounts[0]?.id ?? 0) : selectedAccount;
+        portfolioApi.saveNote({ accountId, symbol, costMethod, content: localVal }).then(() => {
+          localStorage.removeItem(localKey);
+        }).catch(() => {});
       }
     } finally {
       setStockNoteLoaded(prev => ({ ...prev, [symbol]: true }));
