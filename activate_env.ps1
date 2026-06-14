@@ -1,5 +1,5 @@
 # 快速激活虚拟环境脚本
-$venvPath = "$PSScriptRoot\venv\Scripts\Activate.ps1"
+$venvPath = "D:\envs\daily_stock_analysis\Scripts\Activate.ps1"
 
 if (Test-Path $venvPath) {
     & $venvPath

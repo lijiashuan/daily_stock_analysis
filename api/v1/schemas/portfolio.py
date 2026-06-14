@@ -272,3 +272,60 @@ class PortfolioRiskResponse(BaseModel):
     sector_concentration: Dict[str, Any] = Field(default_factory=dict)
     drawdown: Dict[str, Any] = Field(default_factory=dict)
     stop_loss: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TradeMatchItem(BaseModel):
+    buy_trade_id: int
+    buy_date: Optional[str] = None
+    buy_price: float
+    matched_qty: float
+    sell_trade_id: int
+    sell_date: Optional[str] = None
+    sell_price: float
+    realized_pnl: float
+    realized_pnl_pct: float
+    symbol: Optional[str] = None
+
+
+class UnmatchedLotItem(BaseModel):
+    symbol: Optional[str] = None
+    market: Optional[str] = None
+    currency: Optional[str] = None
+    buy_trade_id: int
+    buy_date: Optional[str] = None
+    buy_price: float
+    remaining_quantity: float
+    unit_cost: float
+    total_cost: float
+    breakeven_price: float
+
+
+class UnmatchedSellLotItem(BaseModel):
+    symbol: Optional[str] = None
+    market: Optional[str] = None
+    currency: Optional[str] = None
+    sell_trade_id: int
+    sell_date: Optional[str] = None
+    sell_price: float
+    remaining_quantity: float
+
+
+class TradeMatchSummary(BaseModel):
+    total_matched_pairs: int
+    total_realized_pnl: float
+    total_unmatched_lots: int
+    total_unmatched_quantity: float
+    total_unmatched_cost: float
+    total_unmatched_sells: int = 0
+    total_unmatched_sell_quantity: float = 0.0
+
+
+class TradeMatchResponse(BaseModel):
+    account_id: int
+    account_name: str
+    as_of: str
+    cost_method: str
+    matched_pairs: List[TradeMatchItem] = Field(default_factory=list)
+    unmatched_lots: List[UnmatchedLotItem] = Field(default_factory=list)
+    unmatched_sells: List[UnmatchedSellLotItem] = Field(default_factory=list)
+    summary: TradeMatchSummary

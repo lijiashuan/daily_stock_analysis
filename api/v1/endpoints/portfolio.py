@@ -6,9 +6,9 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime
 from typing import Optional
-
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Response
-
+from sqlalchemy.orm import Session
+from api.deps import get_db
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, Response
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.portfolio import (
     PortfolioAccountCreateRequest,
@@ -28,6 +28,7 @@ from api.v1.schemas.portfolio import (
     PortfolioImportTradeItem,
     PortfolioRiskResponse,
     PortfolioSnapshotResponse,
+    TradeMatchResponse,
     PortfolioTradeListResponse,
     PortfolioTradeCreateRequest,
 )
@@ -520,6 +521,34 @@ def get_snapshot(
         raise _internal_error("Get snapshot failed", exc)
 
 
+@router.get(
+    "/{account_id}/matches",
+    response_model=TradeMatchResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="获取交易匹配对账",
+)
+def get_trade_matches(
+    account_id: int,
+    as_of: Optional[str] = Query(None, description="截止日期, ISO格式, 默认今天"),
+    symbol: Optional[str] = Query(None, description="过滤股票代码"),
+    cost_method: str = Query("fifo", description="成本计算方法: fifo 或 avg"),
+) -> TradeMatchResponse:
+    service = PortfolioService()
+    try:
+        as_of_date = date.fromisoformat(as_of) if as_of else None
+        data = service.get_trade_matches(
+            account_id=account_id,
+            as_of=as_of_date,
+            symbol=symbol,
+            cost_method=cost_method,
+        )
+        return TradeMatchResponse(**data)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get trade matches failed", exc)
+
+
 @router.post(
     "/imports/csv/parse",
     response_model=PortfolioImportParseResponse,
@@ -786,3 +815,47 @@ def export_corporate_actions(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Export corporate actions failed", exc)
+    
+from src.repositories.portfolio_repo import (
+    upsert_stock_note, get_stock_note, delete_stock_note as repo_delete_note,
+)
+from src.storage import StockNote
+from pydantic import BaseModel
+
+class StockNoteRequest(BaseModel):
+    account_id: int
+    symbol: str
+    cost_method: str = 'fifo'
+    content: str
+
+class StockNoteResponse(BaseModel):
+    account_id: int
+    symbol: str
+    cost_method: str
+    content: str
+    updated_at: str | None = None
+
+    class Config:
+        from_attributes = True
+
+@router.get("/note", response_model=StockNoteResponse)
+def get_note(account_id: int, symbol: str, cost_method: str = 'fifo',
+             db: Session = Depends(get_db)):
+    note = get_stock_note(db, account_id, symbol, cost_method)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return note
+
+@router.put("/note", response_model=StockNoteResponse)
+def save_note(req: StockNoteRequest, db: Session = Depends(get_db)):
+    note = upsert_stock_note(db, req.account_id, req.symbol,
+                             req.cost_method, req.content)
+    return note
+
+@router.delete("/note")
+def remove_note(account_id: int, symbol: str, cost_method: str = 'fifo',
+                db: Session = Depends(get_db)):
+    ok = repo_delete_note(db, account_id, symbol, cost_method)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"ok": True}

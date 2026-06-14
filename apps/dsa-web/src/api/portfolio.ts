@@ -17,6 +17,7 @@ import type {
   PortfolioImportParseResponse,
   PortfolioRiskResponse,
   PortfolioSnapshotResponse,
+  TradeMatchResponse,
   PortfolioTradeCreateRequest,
   PortfolioTradeListResponse,
 } from '../types/portfolio';
@@ -321,5 +322,28 @@ export const portfolioApi = {
       responseType: 'blob',
     });
     return response.data as Blob;
+  },
+
+  async getTradeMatches(
+    accountId: number,
+    query: { asOf?: string; symbol?: string; costMethod?: string } = {},
+  ): Promise<TradeMatchResponse> {
+    const params: Record<string, string> = {};
+    if (query.asOf) params.as_of = query.asOf;
+    if (query.symbol) params.symbol = query.symbol;
+    if (query.costMethod) params.cost_method = query.costMethod;
+    const response = await apiClient.get<Record<string, unknown>>(`/api/v1/portfolio/${accountId}/matches`, { params });
+    return toCamelCase<TradeMatchResponse>(response.data);
+  },
+
+
+  async getNote(query: { accountId: number; symbol: string; costMethod?: string }) {
+    const response = await apiClient.get('/api/v1/portfolio/note', { params: query });
+    return toCamelCase(response.data);
+  },
+
+  async saveNote(body: { accountId: number; symbol: string; costMethod?: string; content: string }) {
+    const response = await apiClient.put('/api/v1/portfolio/note', body);
+    return toCamelCase(response.data);
   },
 };

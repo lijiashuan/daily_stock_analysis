@@ -917,6 +917,125 @@ class PortfolioRepository:
             )
         return exc
 
+    def get_fresh_daily_snapshot(
+        self,
+        *,
+        account_id: int,
+        snapshot_date: date,
+        cost_method: str,
+    ) -> Optional[PortfolioDailySnapshot]:
+        with self.db.get_session() as session:
+            snapshot = session.execute(
+                select(PortfolioDailySnapshot).where(
+                    and_(
+                        PortfolioDailySnapshot.account_id == account_id,
+                        PortfolioDailySnapshot.snapshot_date == snapshot_date,
+                        PortfolioDailySnapshot.cost_method == cost_method,
+                    )
+                ).limit(1)
+            ).scalar_one_or_none()
+
+            if snapshot is None:
+                return None
+
+            cutoff = snapshot.updated_at or snapshot.created_at
+            if cutoff is None:
+                return None
+
+            newer_trade = session.execute(
+                select(func.count(PortfolioTrade.id)).where(
+                    and_(
+                        PortfolioTrade.account_id == account_id,
+                        PortfolioTrade.created_at > cutoff,
+                    )
+                )
+            ).scalar_one()
+            if newer_trade > 0:
+                return None
+
+            newer_cash = session.execute(
+                select(func.count(PortfolioCashLedger.id)).where(
+                    and_(
+                        PortfolioCashLedger.account_id == account_id,
+                        PortfolioCashLedger.created_at > cutoff,
+                    )
+                )
+            ).scalar_one()
+            if newer_cash > 0:
+                return None
+
+            newer_corp = session.execute(
+                select(func.count(PortfolioCorporateAction.id)).where(
+                    and_(
+                        PortfolioCorporateAction.account_id == account_id,
+                        PortfolioCorporateAction.created_at > cutoff,
+                    )
+                )
+            ).scalar_one()
+            if newer_corp > 0:
+                return None
+
+            return snapshot
+
+    def read_snapshot_positions(
+        self,
+        *,
+        account_id: int,
+        cost_method: str,
+    ) -> List[Dict[str, Any]]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioPosition).where(
+                    and_(
+                        PortfolioPosition.account_id == account_id,
+                        PortfolioPosition.cost_method == cost_method,
+                    )
+                ).order_by(PortfolioPosition.market_value_base.desc())
+            ).scalars().all()
+            return [
+                {
+                    "symbol": r.symbol,
+                    "market": r.market,
+                    "currency": r.currency,
+                    "quantity": float(r.quantity),
+                    "avg_cost": float(r.avg_cost),
+                    "total_cost": float(r.total_cost),
+                    "last_price": float(r.last_price),
+                    "market_value_base": float(r.market_value_base),
+                    "unrealized_pnl_base": float(r.unrealized_pnl_base),
+                    "valuation_currency": r.valuation_currency,
+                }
+                for r in rows
+            ]
+
+    def read_snapshot_lots(
+        self,
+        *,
+        account_id: int,
+        cost_method: str,
+    ) -> List[Dict[str, Any]]:
+        with self.db.get_session() as session:
+            rows = session.execute(
+                select(PortfolioPositionLot).where(
+                    and_(
+                        PortfolioPositionLot.account_id == account_id,
+                        PortfolioPositionLot.cost_method == cost_method,
+                    )
+                ).order_by(PortfolioPositionLot.open_date.asc())
+            ).scalars().all()
+            return [
+                {
+                    "symbol": r.symbol,
+                    "market": r.market,
+                    "currency": r.currency,
+                    "open_date": r.open_date,
+                    "remaining_quantity": float(r.remaining_quantity),
+                    "unit_cost": float(r.unit_cost),
+                    "source_trade_id": r.source_trade_id,
+                }
+                for r in rows
+            ]
+
     def upsert_daily_snapshot(
         self,
         *,
@@ -1091,3 +1210,42 @@ class PortfolioRepository:
                 existing.updated_at = datetime.now()
 
             session.commit()
+
+# ── Stock Notes ──────────────────────────────────────────────────
+
+def upsert_stock_note(db: Session, account_id: int, symbol: str,
+                      cost_method: str, content: str) -> StockNote:
+    note = db.query(StockNote).filter(
+        StockNote.account_id == account_id,
+        StockNote.symbol == symbol,
+        StockNote.cost_method == cost_method,
+    ).first()
+    if note:
+        note.content = content
+        note.updated_at = datetime.now()
+    else:
+        note = StockNote(account_id=account_id, symbol=symbol,
+                         cost_method=cost_method, content=content)
+        db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+def get_stock_note(db: Session, account_id: int, symbol: str,
+                   cost_method: str) -> Optional[StockNote]:
+    return db.query(StockNote).filter(
+        StockNote.account_id == account_id,
+        StockNote.symbol == symbol,
+        StockNote.cost_method == cost_method,
+    ).first()
+
+
+def delete_stock_note(db: Session, account_id: int, symbol: str,
+                      cost_method: str) -> bool:
+    note = get_stock_note(db, account_id, symbol, cost_method)
+    if note:
+        db.delete(note)
+        db.commit()
+        return True
+    return False

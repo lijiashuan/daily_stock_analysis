@@ -573,6 +573,25 @@ class PortfolioDailySnapshot(Base):
         ),
     )
 
+class StockNote(Base):
+    """Per-stock operation notes tied to an account and cost-method."""
+
+    __tablename__ = 'stock_notes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    symbol = Column(String(16), nullable=False, index=True)
+    cost_method = Column(String(8), nullable=False, default='fifo')
+    content = Column(Text, nullable=False, default='')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'account_id', 'symbol', 'cost_method',
+            name='uix_stock_note_account_symbol_method',
+        ),
+    )
 
 class PortfolioFxRate(Base):
     """Cached FX rates used for cross-currency portfolio conversion."""

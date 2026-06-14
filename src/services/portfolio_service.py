@@ -32,7 +32,7 @@ except Exception:  # pragma: no cover - optional dependency path
 
 EPS = 1e-8
 VALID_MARKETS = {"cn", "hk", "us"}
-VALID_COST_METHODS = {"fifo", "avg"}
+VALID_COST_METHODS = {"fifo", "avg", "profit_priority"}
 VALID_SIDES = {"buy", "sell"}
 VALID_CASH_DIRECTIONS = {"in", "out"}
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
@@ -701,26 +701,43 @@ class PortfolioService:
         }
 
         for account in account_rows:
-            account_snapshot = self._replay_account(account=account, as_of_date=as_of_date, cost_method=method)
-
-            self.repo.replace_positions_lots_and_snapshot(
+            fresh_snapshot = self.repo.get_fresh_daily_snapshot(
                 account_id=account.id,
                 snapshot_date=as_of_date,
                 cost_method=method,
-                base_currency=account.base_currency,
-                total_cash=account_snapshot["total_cash"],
-                total_market_value=account_snapshot["total_market_value"],
-                total_equity=account_snapshot["total_equity"],
-                unrealized_pnl=account_snapshot["unrealized_pnl"],
-                realized_pnl=account_snapshot["realized_pnl"],
-                fee_total=account_snapshot["fee_total"],
-                tax_total=account_snapshot["tax_total"],
-                fx_stale=account_snapshot["fx_stale"],
-                payload=json.dumps(account_snapshot["payload"], ensure_ascii=False),
-                positions=account_snapshot["positions_cache"],
-                lots=account_snapshot["lots_cache"],
-                valuation_currency=account.base_currency,
             )
+            if fresh_snapshot is not None:
+                logger.debug(
+                    "Reusing fresh daily snapshot for account %s on %s [%s]",
+                    account.id, as_of_date, method,
+                )
+                account_snapshot = self._reconstitute_from_daily_snapshot(
+                    snapshot_row=fresh_snapshot,
+                    account=account,
+                    as_of_date=as_of_date,
+                    cost_method=method,
+                )
+            else:
+                account_snapshot = self._replay_account(account=account, as_of_date=as_of_date, cost_method=method)
+
+                self.repo.replace_positions_lots_and_snapshot(
+                    account_id=account.id,
+                    snapshot_date=as_of_date,
+                    cost_method=method,
+                    base_currency=account.base_currency,
+                    total_cash=account_snapshot["total_cash"],
+                    total_market_value=account_snapshot["total_market_value"],
+                    total_equity=account_snapshot["total_equity"],
+                    unrealized_pnl=account_snapshot["unrealized_pnl"],
+                    realized_pnl=account_snapshot["realized_pnl"],
+                    fee_total=account_snapshot["fee_total"],
+                    tax_total=account_snapshot["tax_total"],
+                    fx_stale=account_snapshot["fx_stale"],
+                    payload=json.dumps(account_snapshot["payload"], ensure_ascii=False),
+                    positions=account_snapshot["positions_cache"],
+                    lots=account_snapshot["lots_cache"],
+                    valuation_currency=account.base_currency,
+                )
 
             accounts_payload.append(account_snapshot["public"])
 
@@ -800,6 +817,56 @@ class PortfolioService:
             "tax_total": round(aggregate["tax_total"], 6),
             "fx_stale": aggregate["fx_stale"],
             "accounts": accounts_payload,
+        }
+
+    def get_trade_matches(
+        self,
+        *,
+        account_id: int,
+        as_of: Optional[date] = None,
+        symbol: Optional[str] = None,
+        cost_method: str = "fifo",
+    ) -> Dict[str, Any]:
+        as_of_date = as_of or date.today()
+        method = self._normalize_cost_method(cost_method)
+        account = self._require_active_account(account_id)
+
+        result = self._replay_account(
+            account=account, as_of_date=as_of_date, cost_method=method
+        )
+
+        matched = result.get("match_records", [])
+        unmatched = result.get("unmatched_lots", [])
+        unmatched_sells_raw = result.get("unmatched_sells", [])
+
+        if symbol:
+            symbol_norm = canonical_stock_code(symbol)
+            matched = [m for m in matched if m.get("symbol") == symbol_norm]
+            unmatched = [u for u in unmatched if u.get("symbol") == symbol_norm]
+            unmatched_sells_raw = [s for s in unmatched_sells_raw if s.get("symbol") == symbol_norm]
+
+        total_realized = sum(m["realized_pnl"] for m in matched)
+        total_unmatched_qty = sum(u["remaining_quantity"] for u in unmatched)
+        total_unmatched_cost = sum(u["total_cost"] for u in unmatched)
+        total_unmatched_sell_qty = sum(s["remaining_quantity"] for s in unmatched_sells_raw)
+
+        return {
+            "account_id": account_id,
+            "account_name": account.name,
+            "as_of": as_of_date.isoformat(),
+            "cost_method": method,
+            "matched_pairs": matched,
+            "unmatched_lots": unmatched,
+            "unmatched_sells": unmatched_sells_raw,
+            "summary": {
+                "total_matched_pairs": len(matched),
+                "total_realized_pnl": round(total_realized, 4),
+                "total_unmatched_lots": len(unmatched),
+                "total_unmatched_quantity": round(total_unmatched_qty, 4),
+                "total_unmatched_cost": round(total_unmatched_cost, 4),
+                "total_unmatched_sells": len(unmatched_sells_raw),
+                "total_unmatched_sell_quantity": round(total_unmatched_sell_qty, 4),
+            },
         }
 
     def refresh_fx_rates(
@@ -964,6 +1031,106 @@ class PortfolioService:
 
         return quantity_held
 
+    def _reconstitute_from_daily_snapshot(
+        self,
+        *,
+        snapshot_row: Any,
+        account: Any,
+        as_of_date: date,
+        cost_method: str,
+    ) -> Dict[str, Any]:
+        stored_positions = self.repo.read_snapshot_positions(
+            account_id=account.id,
+            cost_method=cost_method,
+        )
+        stored_lots = self.repo.read_snapshot_lots(
+            account_id=account.id,
+            cost_method=cost_method,
+        )
+
+        position_rows = []
+        market_value_base = 0.0
+        total_cost_base = 0.0
+        fx_stale = bool(snapshot_row.fx_stale)
+
+        for pos in stored_positions:
+            resolved = self._resolve_position_price(
+                symbol=pos["symbol"],
+                as_of_date=as_of_date,
+            )
+            last_price = resolved.price if resolved.is_available else pos["last_price"]
+            qty = float(pos["quantity"])
+            avg_cost = float(pos["avg_cost"])
+            total_cost = float(pos["total_cost"])
+            mv = qty * last_price
+            unrealized = mv - total_cost
+            stock_name = self._fetch_stock_name(symbol=pos["symbol"])
+
+            position_rows.append({
+                "symbol": pos["symbol"],
+                "market": pos["market"],
+                "currency": pos["currency"],
+                "quantity": qty,
+                "avg_cost": avg_cost,
+                "total_cost": total_cost,
+                "last_price": last_price,
+                "market_value_base": mv,
+                "unrealized_pnl_base": unrealized,
+                "valuation_currency": pos.get("valuation_currency", account.base_currency),
+                "price_source": resolved.source,
+                "price_provider": resolved.provider,
+                "price_date": resolved.price_date.isoformat() if resolved.price_date else None,
+                "price_stale": resolved.is_stale,
+                "price_available": resolved.is_available,
+                "stock_name": stock_name,
+            })
+            market_value_base += mv
+            total_cost_base += total_cost
+            if resolved.is_stale:
+                fx_stale = True
+
+        total_cash_base = float(snapshot_row.total_cash or 0.0)
+        unrealized_pnl_base = market_value_base - total_cost_base
+        total_equity_base = total_cash_base + market_value_base
+
+        account_payload = {
+            "account_id": account.id,
+            "account_name": account.name,
+            "owner_id": account.owner_id,
+            "broker": account.broker,
+            "market": account.market,
+            "base_currency": account.base_currency,
+            "as_of": as_of_date.isoformat(),
+            "cost_method": cost_method,
+            "total_cash": round(total_cash_base, 6),
+            "total_market_value": round(market_value_base, 6),
+            "total_equity": round(total_equity_base, 6),
+            "realized_pnl": float(snapshot_row.realized_pnl or 0.0),
+            "unrealized_pnl": round(unrealized_pnl_base, 6),
+            "fee_total": float(snapshot_row.fee_total or 0.0),
+            "tax_total": float(snapshot_row.tax_total or 0.0),
+            "fx_stale": fx_stale,
+            "positions": position_rows,
+        }
+
+        return {
+            "public": account_payload,
+            "payload": account_payload,
+            "positions_cache": stored_positions,
+            "lots_cache": stored_lots,
+            "total_cash": total_cash_base,
+            "total_market_value": market_value_base,
+            "total_equity": total_equity_base,
+            "realized_pnl": float(snapshot_row.realized_pnl or 0.0),
+            "unrealized_pnl": unrealized_pnl_base,
+            "fee_total": float(snapshot_row.fee_total or 0.0),
+            "tax_total": float(snapshot_row.tax_total or 0.0),
+            "fx_stale": fx_stale,
+            "match_records": [],
+            "unmatched_lots": [],
+            "unmatched_sells": [],
+        }
+
     def _replay_account(self, *, account: Any, as_of_date: date, cost_method: str) -> Dict[str, Any]:
         trades = self.repo.list_trades(account.id, as_of=as_of_date)
         cash_ledger = self.repo.list_cash_ledger(account.id, as_of=as_of_date)
@@ -992,6 +1159,9 @@ class PortfolioService:
 
         fifo_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         avg_state: Dict[Tuple[str, str, str], _AvgState] = defaultdict(_AvgState)
+        match_records: List[Dict[str, Any]] = []
+        profit_buy_lots: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
+        pending_sells: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
 
         for event_type, event_date, _, event in events:
             if event_type == "cash":
@@ -1022,7 +1192,49 @@ class PortfolioService:
                 side = (event.side or "").lower().strip()
                 if side == "buy":
                     cash_balances[key[2]] -= (gross + fee + tax)
-                    if cost_method == "fifo":
+                    if cost_method == "profit_priority":
+                        unit_cost = (gross + fee + tax) / qty
+                        remaining_qty, _ = self._match_profit_priority(
+                            source_pool=pending_sells[key],
+                            new_qty=qty,
+                            new_price=price,
+                            new_is_sell=False,
+                            symbol=key[0],
+                            new_date=event_date,
+                            new_trade_id=event.id,
+                            match_records=match_records,
+                        )
+                        matched_qty = qty - remaining_qty
+                        if matched_qty > EPS:
+                            buy_pnl_local = sum(
+                                m["realized_pnl"]
+                                for m in match_records
+                                if m.get("buy_trade_id") == event.id
+                            )
+                            if abs(buy_pnl_local) > EPS:
+                                realized_base, stale_realized, _ = self._convert_amount(
+                                    amount=buy_pnl_local,
+                                    from_currency=key[2],
+                                    to_currency=account.base_currency,
+                                    as_of_date=event_date,
+                                )
+                                realized_pnl_base += realized_base
+                                symbol_realized_pnl[key] += realized_base
+                                fx_stale = fx_stale or stale_realized
+                        profit_buy_lots[key].append({
+                            "symbol": key[0],
+                            "market": key[1],
+                            "currency": key[2],
+                            "open_date": event_date,
+                            "remaining_quantity": qty,
+                            "unit_cost": unit_cost,
+                            "source_trade_id": event.id,
+                            "trade_id": event.id,
+                            "date": event_date,
+                            "price": unit_cost,
+                            "remaining": qty,
+                        })
+                    elif cost_method == "fifo":
                         unit_cost = (gross + fee + tax) / qty
                         fifo_lots[key].append(
                             {
@@ -1042,12 +1254,52 @@ class PortfolioService:
                 elif side == "sell":
                     cash_balances[key[2]] += (gross - fee - tax)
                     proceeds_net = gross - fee - tax
-                    if cost_method == "fifo":
+                    if cost_method == "profit_priority":
+                        remaining_qty, cost_basis = self._match_profit_priority(
+                            source_pool=profit_buy_lots[key],
+                            new_qty=qty,
+                            new_price=price,
+                            new_is_sell=True,
+                            symbol=key[0],
+                            new_date=event_date,
+                            new_trade_id=event.id,
+                            match_records=match_records,
+                        )
+                        matched_qty = qty - remaining_qty
+                        if matched_qty > EPS:
+                            matched_proceeds = matched_qty * price - fee * (matched_qty / qty) - tax * (matched_qty / qty)
+                            realized_local = matched_proceeds - cost_basis
+                            realized_base, stale_realized, _ = self._convert_amount(
+                                amount=realized_local,
+                                from_currency=key[2],
+                                to_currency=account.base_currency,
+                                as_of_date=event_date,
+                            )
+                            realized_pnl_base += realized_base
+                            symbol_realized_pnl[key] += realized_base
+                            fx_stale = fx_stale or stale_realized
+                        if remaining_qty > EPS:
+                            self._consume_fifo_lots(
+                                profit_buy_lots[key], remaining_qty, key[0], event_date
+                            )
+                            pending_sells[key].append({
+                                "trade_id": event.id,
+                                "date": event_date,
+                                "price": price,
+                                "remaining": remaining_qty,
+                                "symbol": key[0],
+                                "market": key[1],
+                                "currency": key[2],
+                            })
+                    elif cost_method == "fifo":
                         cost_basis = self._consume_fifo_lots(
                             fifo_lots[key],
                             qty,
                             key[0],
                             event_date,
+                            sell_trade_id=event.id,
+                            sell_price=price,
+                            match_records=match_records,
                         )
                     else:
                         cost_basis = self._consume_avg_position(
@@ -1056,17 +1308,17 @@ class PortfolioService:
                             key[0],
                             event_date,
                         )
-                    realized_local = proceeds_net - cost_basis
-                    realized_base, stale_realized, _ = self._convert_amount(
-                        amount=realized_local,
-                        from_currency=key[2],
-                        to_currency=account.base_currency,
-                        as_of_date=event_date,
-                    )
-                    realized_pnl_base += realized_base
-                    # Track per-symbol realized PnL
-                    symbol_realized_pnl[key] += realized_base
-                    fx_stale = fx_stale or stale_realized
+                    if cost_method != "profit_priority":
+                        realized_local = proceeds_net - cost_basis
+                        realized_base, stale_realized, _ = self._convert_amount(
+                            amount=realized_local,
+                            from_currency=key[2],
+                            to_currency=account.base_currency,
+                            as_of_date=event_date,
+                        )
+                        realized_pnl_base += realized_base
+                        symbol_realized_pnl[key] += realized_base
+                        fx_stale = fx_stale or stale_realized
                 else:
                     raise ValueError(f"Unsupported trade side: {event.side}")
 
@@ -1100,8 +1352,8 @@ class PortfolioService:
                         continue
                     qty_held = self._held_quantity(
                         key=key,
-                        cost_method=cost_method,
-                        fifo_lots=fifo_lots,
+                        cost_method=cost_method if cost_method != "profit_priority" else "fifo",
+                        fifo_lots=profit_buy_lots if cost_method == "profit_priority" else fifo_lots,
                         avg_state=avg_state,
                     )
                     if qty_held > EPS:
@@ -1112,10 +1364,14 @@ class PortfolioService:
                         raise ValueError(f"Invalid split_ratio for {event.symbol}")
                     if abs(split_ratio - 1.0) <= EPS:
                         continue
-                    if cost_method == "fifo":
-                        for lot in fifo_lots[key]:
+                    if cost_method in ("fifo", "profit_priority"):
+                        source_lots = profit_buy_lots if cost_method == "profit_priority" else fifo_lots
+                        for lot in source_lots[key]:
                             lot["remaining_quantity"] *= split_ratio
                             lot["unit_cost"] /= split_ratio
+                            if cost_method == "profit_priority":
+                                lot["remaining"] = lot["remaining_quantity"]
+                                lot["price"] = lot["unit_cost"]
                     else:
                         state = avg_state[key]
                         state.quantity *= split_ratio
@@ -1125,8 +1381,8 @@ class PortfolioService:
         position_rows, lot_rows, market_value_base, total_cost_base, stale_pos = self._build_positions(
             account=account,
             as_of_date=as_of_date,
-            cost_method=cost_method,
-            fifo_lots=fifo_lots,
+            cost_method=cost_method if cost_method != "profit_priority" else "fifo",
+            fifo_lots=profit_buy_lots if cost_method == "profit_priority" else fifo_lots,
             avg_state=avg_state,
             symbol_realized_pnl=symbol_realized_pnl,
         )
@@ -1166,6 +1422,40 @@ class PortfolioService:
             "positions": position_rows,
         }
 
+        unmatched_lots: List[Dict[str, Any]] = []
+        if cost_method in ("fifo", "profit_priority"):
+            lots_source = fifo_lots if cost_method == "fifo" else profit_buy_lots
+            for key, lots in lots_source.items():
+                for lot in lots:
+                    if lot["remaining_quantity"] > EPS:
+                        unmatched_lots.append({
+                            "symbol": lot["symbol"],
+                            "market": lot["market"],
+                            "currency": lot["currency"],
+                            "buy_trade_id": lot["source_trade_id"],
+                            "buy_date": lot["open_date"].isoformat() if lot["open_date"] else None,
+                            "buy_price": round(float(lot["unit_cost"]), 4),
+                            "remaining_quantity": round(float(lot["remaining_quantity"]), 4),
+                            "unit_cost": round(float(lot["unit_cost"]), 4),
+                            "total_cost": round(float(lot["remaining_quantity"]) * float(lot["unit_cost"]), 4),
+                            "breakeven_price": round(float(lot["unit_cost"]), 4),
+                        })
+
+        unmatched_sells: List[Dict[str, Any]] = []
+        if cost_method == "profit_priority":
+            for key, sells in pending_sells.items():
+                for s in sells:
+                    if s["remaining"] > EPS:
+                        unmatched_sells.append({
+                            "symbol": s["symbol"],
+                            "market": s["market"],
+                            "currency": s["currency"],
+                            "sell_trade_id": s["trade_id"],
+                            "sell_date": s["date"].isoformat() if s["date"] else None,
+                            "sell_price": round(float(s["price"]), 4),
+                            "remaining_quantity": round(float(s["remaining"]), 4),
+                        })
+
         return {
             "public": account_payload,
             "payload": account_payload,
@@ -1179,6 +1469,9 @@ class PortfolioService:
             "fee_total": float(fees_total_base),
             "tax_total": float(taxes_total_base),
             "fx_stale": fx_stale,
+            "match_records": match_records,
+            "unmatched_lots": unmatched_lots,
+            "unmatched_sells": unmatched_sells,
         }
 
     def _build_positions(
@@ -1484,11 +1777,106 @@ class PortfolioService:
         return values
 
     @staticmethod
+    def _match_profit_priority(
+        source_pool: List[Dict[str, Any]],
+        new_qty: float,
+        new_price: float,
+        new_is_sell: bool,
+        symbol: str,
+        new_date: date,
+        new_trade_id: int,
+        match_records: List[Dict[str, Any]],
+    ) -> Tuple[float, float]:
+        """Match a new trade against a pool using profit-priority.
+
+        Returns (remaining_qty, matched_cost_basis).
+        """
+        remaining = new_qty
+        matched_cost = 0.0
+
+        while remaining > EPS:
+            candidates = []
+            for lot in source_pool:
+                lot_price = float(lot["price"])
+                if new_is_sell:
+                    if lot_price < new_price:
+                        candidates.append(lot)
+                else:
+                    if new_price < lot_price:
+                        candidates.append(lot)
+
+            if not candidates:
+                break
+
+            exact_matches = [c for c in candidates if abs(c["remaining"] - remaining) <= EPS]
+
+            if exact_matches:
+                exact_matches.sort(key=lambda c: (
+                    -abs(new_price - c["price"]),
+                    c["date"],
+                ))
+                best = exact_matches[0]
+            else:
+                candidates.sort(key=lambda c: (
+                    -abs(new_price - c["price"]),
+                    c["date"],
+                ))
+                best = candidates[0]
+
+            take = min(remaining, best["remaining"])
+
+            if new_is_sell:
+                buy_price = float(best["price"])
+                buy_trade_id = best["trade_id"]
+                buy_date = best["date"]
+                sell_price = new_price
+                sell_trade_id = new_trade_id
+                sell_date = new_date
+            else:
+                buy_price = new_price
+                buy_trade_id = new_trade_id
+                buy_date = new_date
+                sell_price = float(best["price"])
+                sell_trade_id = best["trade_id"]
+                sell_date = best["date"]
+
+            match_records.append({
+                "symbol": symbol,
+                "buy_trade_id": buy_trade_id,
+                "buy_date": buy_date.isoformat() if buy_date else None,
+                "buy_price": round(buy_price, 4),
+                "matched_qty": round(take, 4),
+                "sell_trade_id": sell_trade_id,
+                "sell_date": sell_date.isoformat() if sell_date else None,
+                "sell_price": round(sell_price, 4),
+                "realized_pnl": round(take * (sell_price - buy_price), 4),
+                "realized_pnl_pct": round(
+                    (sell_price - buy_price) / buy_price * 100, 2
+                ) if buy_price > EPS else 0.0,
+            })
+
+            if new_is_sell:
+                matched_cost += take * buy_price
+
+            best["remaining"] = float(best["remaining"]) - take
+            if "remaining_quantity" in best:
+                best["remaining_quantity"] = best["remaining"]
+            remaining -= take
+
+            if best["remaining"] <= EPS:
+                source_pool.remove(best)
+
+        return remaining, matched_cost
+
+    @staticmethod
     def _consume_fifo_lots(
         lots: List[Dict[str, Any]],
         quantity: float,
         symbol: str,
         trade_date: Optional[date] = None,
+        sell_trade_id: Optional[int] = None,
+        sell_price: float = 0.0,
+        match_records: Optional[List[Dict[str, Any]]] = None,
     ) -> float:
         remaining = quantity
         cost_basis = 0.0
@@ -1503,6 +1891,24 @@ class PortfolioService:
             head = lots[0]
             take = min(remaining, float(head["remaining_quantity"]))
             cost_basis += take * float(head["unit_cost"])
+
+            if match_records is not None and sell_trade_id is not None:
+                buy_price = float(head["unit_cost"])
+                match_records.append({
+                    "symbol": symbol,
+                    "buy_trade_id": head["source_trade_id"],
+                    "buy_date": head["open_date"].isoformat() if head["open_date"] else None,
+                    "buy_price": round(buy_price, 4),
+                    "matched_qty": round(take, 4),
+                    "sell_trade_id": sell_trade_id,
+                    "sell_date": trade_date.isoformat() if trade_date else None,
+                    "sell_price": round(sell_price, 4),
+                    "realized_pnl": round(take * (sell_price - buy_price), 4),
+                    "realized_pnl_pct": round(
+                        (sell_price - buy_price) / buy_price * 100, 2
+                    ) if buy_price > EPS else 0.0,
+                })
+
             head["remaining_quantity"] = float(head["remaining_quantity"]) - take
             remaining -= take
             if head["remaining_quantity"] <= EPS:
@@ -1859,7 +2265,7 @@ class PortfolioService:
     def _normalize_cost_method(value: str) -> str:
         method = (value or "").strip().lower()
         if method not in VALID_COST_METHODS:
-            raise ValueError("cost_method must be fifo or avg")
+            raise ValueError("cost_method must be fifo, avg, or profit_priority")
         return method
 
     @staticmethod

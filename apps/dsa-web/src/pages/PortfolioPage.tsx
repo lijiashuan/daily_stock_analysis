@@ -21,6 +21,10 @@ import type {
   PortfolioSide,
   PortfolioSnapshotResponse,
   PortfolioTradeListItem,
+  TradeMatchItem,
+  TradeMatchResponse,
+  UnmatchedLotItem,
+  UnmatchedSellLotItem,
 } from '../types/portfolio';
 
 const PIE_COLORS = ['#00d4ff', '#00ff88', '#ffaa00', '#ff7a45', '#7f8cff', '#ff4466'];
@@ -217,6 +221,15 @@ const PortfolioPage: React.FC = () => {
   const [error, setError] = useState<ParsedApiError | null>(null);
   const [riskWarning, setRiskWarning] = useState<string | null>(null);
   const [writeWarning, setWriteWarning] = useState<string | null>(null);
+  const [expandedMatchSymbol, setExpandedMatchSymbol] = useState<string | null>(null);
+  const [stockNoteSaving, setStockNoteSaving] = useState<Record<string, boolean>>({});
+  const [stockNoteSaved, setStockNoteSaved] = useState<Record<string, boolean>>({});
+  const [stockNoteLoaded, setStockNoteLoaded] = useState<Record<string, boolean | undefined>>({});
+  const [stockNoteLastSaved, setStockNoteLastSaved] = useState<Record<string, string>>({});
+  const [stockNotes, setStockNotes] = useState<Record<string, string>>({});
+  const [stockNoteEditing, setStockNoteEditing] = useState<Record<string, boolean>>({});
+  const [matchData, setMatchData] = useState<TradeMatchResponse | null>(null);
+  const [matchLoading, setMatchLoading] = useState(false);
 
   const [brokers, setBrokers] = useState<PortfolioImportBrokerItem[]>([]);
   const [selectedBroker, setSelectedBroker] = useState('huatai');
@@ -549,6 +562,13 @@ const PortfolioPage: React.FC = () => {
     }
   }, [writeBlocked]);
 
+  useEffect(() => {
+    if (expandedMatchSymbol) {
+      const saved = localStorage.getItem(`stock_note_${expandedMatchSymbol}`);
+      setStockNotes(prev => ({ ...prev, [expandedMatchSymbol]: saved || '' }));
+    }
+  }, [expandedMatchSymbol]);
+
   const positionRows: FlatPosition[] = useMemo(() => {
     if (!snapshot) return [];
     const rows: FlatPosition[] = [];
@@ -829,6 +849,73 @@ const PortfolioPage: React.FC = () => {
     await Promise.all([loadAccounts(), loadSnapshotAndRisk(), loadEvents(), loadBrokers()]);
   };
 
+  const handleToggleMatchDetails = useCallback(async (symbol: string) => {
+    const accountId = selectedAccount === 'all' ? (accounts[0]?.id ?? 0) : selectedAccount;
+    if (!accountId) return;
+
+    if (expandedMatchSymbol === symbol) {
+      setExpandedMatchSymbol(null);
+      setMatchData(null);
+      return;
+    }
+
+    setExpandedMatchSymbol(symbol);
+    if (!stockNotes.hasOwnProperty(symbol)) {
+      loadStockNote(symbol);
+    }
+    setMatchLoading(true);  
+    try {
+      const data = await portfolioApi.getTradeMatches(accountId, { symbol, costMethod });
+      setMatchData(data);
+    } catch (err) {
+      setMatchData(null);
+    } finally {
+      setMatchLoading(false);
+    }
+  }, [selectedAccount, accounts, expandedMatchSymbol, costMethod]);
+  const loadStockNote = useCallback(async (symbol: string) => {
+    setStockNoteLoaded(prev => ({ ...prev, [symbol]: undefined }));
+    try {
+      const res: any = await portfolioApi.getNote({ accountId: selectedAccount === 'all' ? (accounts[0]?.id ?? 0) : selectedAccount, symbol, costMethod });
+      setStockNotes(prev => ({ ...prev, [symbol]: res.content || '' }));
+      if (res.updatedAt) {
+        setStockNoteLastSaved(prev => ({ ...prev, [symbol]: res.updatedAt! }));
+      }
+    } catch {
+      const localKey = `stock_note_${symbol}`;
+      const localVal = localStorage.getItem(localKey);
+      if (localVal) {
+        setStockNotes(prev => ({ ...prev, [symbol]: localVal }));
+        handleSaveNote(symbol, true);
+      }
+    } finally {
+      setStockNoteLoaded(prev => ({ ...prev, [symbol]: true }));
+    }
+  }, [selectedAccount, accounts, costMethod]);
+
+  const handleSaveNote = useCallback(async (symbol: string, silent = false) => {
+    const content = stockNotes[symbol] || '';
+    setStockNoteSaving(prev => ({ ...prev, [symbol]: true }));
+    try {
+      await portfolioApi.saveNote({
+        accountId: selectedAccount === 'all' ? (accounts[0]?.id ?? 0) : selectedAccount,
+        symbol, costMethod, content,
+      });
+      const now = new Date();
+      const ds = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      setStockNoteLastSaved(prev => ({ ...prev, [symbol]: ds }));
+      localStorage.removeItem(`stock_note_${symbol}`);
+      if (!silent) {
+        setStockNoteSaved(prev => ({ ...prev, [symbol]: true }));
+        setTimeout(() => setStockNoteSaved(prev => ({ ...prev, [symbol]: false })), 2000);
+      }
+    } catch {
+      localStorage.setItem(`stock_note_${symbol}`, content);
+    } finally {
+      setStockNoteSaving(prev => ({ ...prev, [symbol]: false }));
+    }
+  }, [stockNotes, selectedAccount, accounts, costMethod]);
+
   const handleExport = useCallback(async () => {
     if (exportLoading) return; // Prevent multiple clicks
     
@@ -1036,6 +1123,7 @@ const PortfolioPage: React.FC = () => {
                 >
                   <option value="fifo">先进先出（FIFO）</option>
                   <option value="avg">均价成本（AVG）</option>
+                  <option value="profit_priority">盈利优先（PP）</option>
                 </select>
               </div>
               <div className="flex gap-2">
@@ -1233,59 +1321,231 @@ const PortfolioPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {positionRows.map((row) => (
-                    <tr key={`${row.accountId}-${row.symbol}-${row.market}`} className="border-b border-white/5">
-                      {selectedAccount === 'all' ? null : (
-                        <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
-                      )}
-                      <td className="py-2 pr-2">
-                        <div className="text-foreground">{(row as any).stockName || row.symbol}</div>
-                        {(row as any).stockName && <div className="text-[11px] text-secondary font-mono">{row.symbol}</div>}
-                      </td>
-                      <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
-                      <td className="py-2 pr-2 text-right">{row.avgCost.toFixed(4)}</td>
-                      <td className="py-2 pr-2 text-right">
-                        <div>{formatPositionPrice(row)}</div>
-                        <div className={`text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`}>
-                          {getPositionPriceLabel(row)}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-2 text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
-                      <td
-                        className={`py-2 pr-2 text-right ${
-                          hasPositionPrice(row)
-                            ? row.unrealizedPnlBase >= 0
-                              ? 'text-danger'
-                              : 'text-success'
-                            : 'text-secondary'
-                        }`}
-                      >
-                        {formatPositionMoney(row.unrealizedPnlBase, row)}
-                      </td>
-                      <td
-                        className={`py-2 pr-2 text-right ${
-                          (row as any).realizedPnlBase !== null && (row as any).realizedPnlBase !== undefined
-                            ? (row as any).realizedPnlBase >= 0
-                              ? 'text-danger'
-                              : 'text-success'
-                            : 'text-secondary'
-                        }`}
-                      >
-                        {formatPositionMoney((row as any).realizedPnlBase || 0, { ...row, priceAvailable: true })}
-                      </td>
-                      <td
-                        className={`py-2 text-right ${
-                          hasPositionPrice(row) && row.unrealizedPnlPct !== null && row.unrealizedPnlPct !== undefined
-                            ? row.unrealizedPnlPct >= 0
-                              ? 'text-danger'
-                              : 'text-success'
-                            : 'text-secondary'
-                        }`}
-                      >
-                        {formatSignedPct(row.unrealizedPnlPct)}
-                      </td>
-                    </tr>
-                  ))}
+                  {positionRows.map((row) => {
+                    const isExpanded = expandedMatchSymbol === row.symbol;
+                    const isMatchLoading = isExpanded && matchLoading;
+                    const rowMatchData = isExpanded ? matchData : null;
+
+                    return (
+                      <>
+                        <tr
+                          className={`border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors ${isExpanded ? 'bg-white/5' : ''}`}
+                          onClick={() => handleToggleMatchDetails(row.symbol)}
+                          title="点击查看交易匹配详情"
+                        >
+                          {selectedAccount === 'all' ? null : (
+                            <td className="py-2 pr-2 text-secondary">{row.accountName}</td>
+                          )}
+                          <td className="py-2 pr-2">
+                            <div className="flex items-center gap-1">
+                              <span className="text-foreground">{(row as any).stockName || row.symbol}</span>
+                              <svg className={`w-3 h-3 text-secondary transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </div>
+                            {(row as any).stockName && <div className="text-[11px] text-secondary font-mono">{row.symbol}</div>}
+                          </td>
+                          <td className="py-2 pr-2 text-right">{row.quantity.toFixed(2)}</td>
+                          <td className="py-2 pr-2 text-right">{row.avgCost.toFixed(4)}</td>
+                          <td className="py-2 pr-2 text-right">
+                            <div>{formatPositionPrice(row)}</div>
+                            <div className={`text-[11px] ${hasPositionPrice(row) ? 'text-secondary' : 'text-warning'}`}>
+                              {getPositionPriceLabel(row)}
+                            </div>
+                          </td>
+                          <td className="py-2 pr-2 text-right">{formatPositionMoney(row.marketValueBase, row)}</td>
+                          <td
+                            className={`py-2 pr-2 text-right ${
+                              hasPositionPrice(row)
+                                ? row.unrealizedPnlBase >= 0
+                                  ? 'text-danger'
+                                  : 'text-success'
+                                : 'text-secondary'
+                            }`}
+                          >
+                            {formatPositionMoney(row.unrealizedPnlBase, row)}
+                          </td>
+                          <td
+                            className={`py-2 pr-2 text-right ${
+                              (row as any).realizedPnlBase !== null && (row as any).realizedPnlBase !== undefined
+                                ? (row as any).realizedPnlBase >= 0
+                                  ? 'text-danger'
+                                  : 'text-success'
+                                : 'text-secondary'
+                            }`}
+                          >
+                            {formatPositionMoney((row as any).realizedPnlBase || 0, { ...row, priceAvailable: true })}
+                          </td>
+                          <td
+                            className={`py-2 text-right ${
+                              hasPositionPrice(row) && row.unrealizedPnlPct !== null && row.unrealizedPnlPct !== undefined
+                                ? row.unrealizedPnlPct >= 0
+                                  ? 'text-danger'
+                                  : 'text-success'
+                                : 'text-secondary'
+                            }`}
+                          >
+                            {formatSignedPct(row.unrealizedPnlPct)}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="border-b border-white/5">
+                            <td colSpan={selectedAccount === 'all' ? 9 : 10} className="py-3 px-4 bg-white/[0.02]">
+                              {isMatchLoading ? (
+                                <div className="text-center text-secondary text-xs py-4">加载中...</div>
+                              ) : (rowMatchData && (rowMatchData.matchedPairs || rowMatchData.unmatchedLots || rowMatchData.unmatchedSells)) ? (
+                                <div className="space-y-3">
+                                                                    <div className="stock-note-section">
+                                    <div className="stock-note-header">
+                                      <span className="stock-note-label">📝 操作笔记</span>
+                                      {stockNoteLoaded[row.symbol] === undefined && (
+                                        <span className="stock-note-status loading">⏳ 加载中…</span>
+                                      )}
+                                      {stockNoteLastSaved[row.symbol] && (
+                                        <span className="stock-note-saved-at">上次保存: {stockNoteLastSaved[row.symbol]}</span>
+                                      )}
+                                    </div>
+                                    {stockNoteEditing[row.symbol] ? (
+                                      <>
+                                        <textarea
+                                          className="stock-note-textarea"
+                                          rows={6}
+                                          placeholder="记录该股票的操作想法、关键事件、后续计划…"
+                                          value={stockNotes[row.symbol] || ''}
+                                          onChange={(e) => {
+                                            const value = e.target.value;
+                                            setStockNotes(prev => ({ ...prev, [row.symbol]: value }));
+                                          }}
+                                        />
+                                        <div className="stock-note-footer">
+                                          <div className="stock-note-info">
+                                            {stockNoteSaved[row.symbol] && (
+                                              <span className="stock-note-saved-badge">✅ 已保存</span>
+                                            )}
+                                          </div>
+                                          <div className="stock-note-actions">
+                                            <button
+                                              className="btn-secondary stock-note-action-btn"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setStockNoteEditing(prev => ({ ...prev, [row.symbol]: false }));
+                                              }}
+                                            >
+                                              取消
+                                            </button>
+                                            <button
+                                              className="btn-primary stock-note-action-btn"
+                                              disabled={stockNoteSaving[row.symbol]}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleSaveNote(row.symbol);
+                                                setStockNoteEditing(prev => ({ ...prev, [row.symbol]: false }));
+                                              }}
+                                            >
+                                              {stockNoteSaving[row.symbol] ? '⏳ 保存中…' : '💾 保存'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <div className="stock-note-preview">
+                                          {stockNotes[row.symbol] ? (
+                                            <div className="stock-note-content">{stockNotes[row.symbol]}</div>
+                                          ) : (
+                                            <div className="stock-note-empty">暂无笔记，点击"编辑"开始记录</div>
+                                          )}
+                                        </div>
+                                        <div className="stock-note-footer">
+                                          <div className="stock-note-info" />
+                                          <div className="stock-note-actions">
+                                            <button
+                                              className="btn-primary stock-note-action-btn"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setStockNoteEditing(prev => ({ ...prev, [row.symbol]: true }));
+                                              }}
+                                            >
+                                              ✏️ 编辑
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>                                  
+                                  {(rowMatchData.matchedPairs || []).length > 0 && (
+                                    <div>
+                                      <div className="text-xs font-semibold text-foreground mb-2">
+                                        ✅ 已匹配交易 ({(rowMatchData.matchedPairs || []).length} 对)
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        {(rowMatchData.matchedPairs || []).map((m: TradeMatchItem, idx: number) => (
+                                          <div key={idx} className="flex items-center gap-3 text-xs bg-white/5 rounded-lg px-3 py-2">
+                                            <span className="text-secondary">买入 {m.buyDate}</span>
+                                            <span className="text-foreground">{m.matchedQty.toFixed(0)}股 @{m.buyPrice.toFixed(4)}</span>
+                                            <span className="text-secondary">→</span>
+                                            <span className="text-secondary">卖出 {m.sellDate}</span>
+                                            <span className="text-foreground">{m.matchedQty.toFixed(0)}股 @{m.sellPrice.toFixed(4)}</span>
+                                            <span className={`font-semibold ${m.realizedPnl >= 0 ? 'text-danger' : 'text-success'}`}>
+                                              {m.realizedPnl >= 0 ? '+' : ''}{m.realizedPnl.toFixed(2)} ({m.realizedPnlPct >= 0 ? '+' : ''}{m.realizedPnlPct.toFixed(2)}%)
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {(rowMatchData.unmatchedLots || []).length > 0 && (
+                                    <div>
+                                      <div className="text-xs font-semibold text-foreground mb-2">
+                                        📦 未匹配持仓 ({(rowMatchData.unmatchedLots || []).length} 批)
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        {(rowMatchData.unmatchedLots || []).map((u: UnmatchedLotItem, idx: number) => (
+                                          <div key={idx} className="flex items-center gap-3 text-xs bg-white/5 rounded-lg px-3 py-2">
+                                            <span className="text-secondary">买入 {u.buyDate}</span>
+                                            <span className="text-foreground">{u.remainingQuantity.toFixed(0)}股 @{u.unitCost.toFixed(4)}</span>
+                                            <span className="text-secondary">
+                                              成本 {u.totalCost.toFixed(2)} | 保本价: {u.breakevenPrice.toFixed(4)}
+                                            </span>
+                                            <span className="text-warning">
+                                              💡 建议卖出价: {(u.breakevenPrice * 1.05).toFixed(4)} (+5%)
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {(rowMatchData.unmatchedSells || []).length > 0 && (
+                                    <div>
+                                      <div className="text-xs font-semibold text-foreground mb-2">
+                                        🔻 未匹配卖出 ({(rowMatchData.unmatchedSells || []).length} 笔)
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        {(rowMatchData.unmatchedSells || []).map((s: UnmatchedSellLotItem, idx: number) => (
+                                          <div key={idx} className="flex items-center gap-3 text-xs bg-white/5 rounded-lg px-3 py-2">
+                                            <span className="text-secondary">卖出 {s.sellDate}</span>
+                                            <span className="text-foreground">{s.remainingQuantity.toFixed(0)}股 @{s.sellPrice.toFixed(4)}</span>
+                                            <span className="text-warning">
+                                              ⚠️ 待低价买入匹配 | 建议买入价: {(s.sellPrice * 0.95).toFixed(4)} (-5%)
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {(rowMatchData.matchedPairs || []).length === 0 && (rowMatchData.unmatchedLots || []).length === 0 && (rowMatchData.unmatchedSells || []).length === 0 && (
+                                    <div className="text-center text-secondary text-xs py-2">暂无匹配数据</div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-center text-secondary text-xs py-2">加载失败</div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

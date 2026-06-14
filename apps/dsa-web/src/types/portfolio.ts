@@ -1,4 +1,4 @@
-export type PortfolioCostMethod = 'fifo' | 'avg';
+export type PortfolioCostMethod = 'fifo' | 'avg' | 'profit_priority';
 export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
 export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
@@ -307,4 +307,61 @@ export interface PortfolioFxRefreshResponse {
   updatedCount: number;
   staleCount: number;
   errorCount: number;
+}
+
+export interface TradeMatchItem {
+  buyTradeId: number;
+  buyDate: string | null;
+  buyPrice: number;
+  matchedQty: number;
+  sellTradeId: number;
+  sellDate: string | null;
+  sellPrice: number;
+  realizedPnl: number;
+  realizedPnlPct: number;
+  symbol: string | null;
+}
+
+export interface UnmatchedLotItem {
+  symbol: string | null;
+  market: string | null;
+  currency: string | null;
+  buyTradeId: number;
+  buyDate: string | null;
+  buyPrice: number;
+  remainingQuantity: number;
+  unitCost: number;
+  totalCost: number;
+  breakevenPrice: number;
+}
+
+export interface UnmatchedSellLotItem {
+  symbol: string | null;
+  market: string | null;
+  currency: string | null;
+  sellTradeId: number;
+  sellDate: string | null;
+  sellPrice: number;
+  remainingQuantity: number;
+}
+
+export interface TradeMatchSummary {
+  totalMatchedPairs: number;
+  totalRealizedPnl: number;
+  totalUnmatchedLots: number;
+  totalUnmatchedQuantity: number;
+  totalUnmatchedCost: number;
+  totalUnmatchedSells: number;
+  totalUnmatchedSellQuantity: number;
+}
+
+export interface TradeMatchResponse {
+  accountId: number;
+  accountName: string;
+  asOf: string;
+  costMethod: string;
+  matchedPairs: TradeMatchItem[];
+  unmatchedLots: UnmatchedLotItem[];
+  unmatchedSells: UnmatchedSellLotItem[];
+  summary: TradeMatchSummary;
 }

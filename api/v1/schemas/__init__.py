@@ -92,6 +92,10 @@ from api.v1.schemas.portfolio import (
     PortfolioImportBrokerListResponse,
     PortfolioFxRefreshResponse,
     PortfolioRiskResponse,
+    TradeMatchItem,
+    UnmatchedLotItem,
+    TradeMatchSummary,
+    TradeMatchResponse,
 )
 from api.v1.schemas.alerts import (
     AlertDeleteResponse,
@@ -185,6 +189,10 @@ __all__ = [
     "PortfolioImportBrokerListResponse",
     "PortfolioFxRefreshResponse",
     "PortfolioRiskResponse",
+    "TradeMatchItem",
+    "UnmatchedLotItem",
+    "TradeMatchSummary",
+    "TradeMatchResponse",
     # alerts
     "AlertDeleteResponse",
     "AlertNotificationItem",
