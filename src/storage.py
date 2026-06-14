@@ -856,13 +856,23 @@ class DatabaseManager:
         """
         清理数据库引擎（atexit 钩子）
 
-        确保程序退出时关闭所有数据库连接，避免 ResourceWarning
+        确保程序退出时关闭所有数据库连接，避免 ResourceWarning。
+        对于 SQLite 文件数据库，先执行 WAL checkpoint 将日志写入主文件，
+        确保云盘同步工具（如坚果云）能同步到完整的最新数据。
 
         Args:
             engine: SQLAlchemy 引擎对象
         """
         try:
             if engine is not None:
+                # WAL 检查点：将所有未写入的 WAL 日志合并到主数据库文件
+                # 确保坚果云等云盘同步工具能获取到完整的最新数据
+                try:
+                    with engine.connect() as conn:
+                        conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+                        conn.commit()
+                except Exception:
+                    pass  # 非 SQLite 或连接已关闭时忽略
                 engine.dispose()
                 logger.debug("数据库引擎已清理")
         except Exception as e:

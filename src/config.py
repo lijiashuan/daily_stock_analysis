@@ -2624,10 +2624,21 @@ class Config:
     def get_db_url(self) -> str:
         """
         获取 SQLAlchemy 数据库连接 URL
-        
-        自动创建数据库目录（如果不存在）
+
+        自动创建数据库目录（如果不存在）。
+        如果配置的数据库路径所在目录不可用（如坚果云未登录），
+        自动回退到本地路径 ./data/stock_analysis.db。
         """
         db_path = Path(self.database_path)
+        if not db_path.parent.exists():
+            fallback = Path("./data/stock_analysis.db")
+            fallback.parent.mkdir(parents=True, exist_ok=True)
+            logger.warning(
+                "数据库目录不可用: %s，回退到本地路径: %s",
+                db_path.parent,
+                fallback.absolute(),
+            )
+            return f"sqlite:///{fallback.absolute()}"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite:///{db_path.absolute()}"
 

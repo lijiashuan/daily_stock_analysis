@@ -562,13 +562,6 @@ const PortfolioPage: React.FC = () => {
     }
   }, [writeBlocked]);
 
-  useEffect(() => {
-    if (expandedMatchSymbol) {
-      const saved = localStorage.getItem(`stock_note_${expandedMatchSymbol}`);
-      setStockNotes(prev => ({ ...prev, [expandedMatchSymbol]: saved || '' }));
-    }
-  }, [expandedMatchSymbol]);
-
   const positionRows: FlatPosition[] = useMemo(() => {
     if (!snapshot) return [];
     const rows: FlatPosition[] = [];
