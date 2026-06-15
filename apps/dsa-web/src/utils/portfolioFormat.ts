@@ -20,6 +20,15 @@ export function getTodayIso(): string {
   return toDateInputValue(new Date());
 }
 
+export function getNowIsoDatetime(): string {
+  const now = new Date();
+  return now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0') + 'T' +
+    String(now.getHours()).padStart(2, '0') + ':' +
+    String(now.getMinutes()).padStart(2, '0');
+}
+
 export function formatMoney(value: number | undefined | null, currency = 'CNY'): string {
   if (value == null || Number.isNaN(value)) return '--';
   return `${currency} ${Number(value).toLocaleString('zh-CN', {

@@ -24,7 +24,7 @@ import {
   getCsvParseVariant,
   getFxRefreshFeedbackVariant,
   getPositionPriceLabel,
-  getTodayIso,
+  getNowIsoDatetime,
   hasPositionPrice,
 } from '../utils/portfolioFormat';
 import type {

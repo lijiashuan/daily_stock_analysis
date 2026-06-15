@@ -1,16 +1,6 @@
 import type React from 'react';
 import { lazy, useEffect } from 'react';
 import { BrowserRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import HomePage from './pages/HomePage';
-import BacktestPage from './pages/BacktestPage';
-import OperationDashboardPage from './pages/OperationDashboardPage';
-import SettingsPage from './pages/SettingsPage';
-import LoginPage from './pages/LoginPage';
-import NotFoundPage from './pages/NotFoundPage';
-import ChatPage from './pages/ChatPage';
-import PortfolioPage from './pages/PortfolioPage';
-import SimulationTradingPage from './pages/SimulationTradingPage';
-import AlertsPage from './pages/AlertsPage';
 import { ApiErrorAlert, Shell } from './components/common';
 import {
   PageLoadingFallback,
@@ -31,6 +21,8 @@ const ChatPage = lazy(() => import('./pages/ChatPage'));
 const PortfolioPage = lazy(() => import('./pages/PortfolioPage'));
 const AlertsPage = lazy(() => import('./pages/AlertsPage'));
 const StockScreeningPage = lazy(() => import('./pages/StockScreeningPage'));
+const SimulationTradingPage = lazy(() => import('./pages/SimulationTradingPage'));
+const OperationDashboardPage = lazy(() => import('./pages/OperationDashboardPage'));
 
 const AppContent: React.FC = () => {
   const location = useLocation();

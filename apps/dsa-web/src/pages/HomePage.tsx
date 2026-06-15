@@ -103,6 +103,8 @@ const HomePage: React.FC = () => {
     isLoadingMoreStockHistory,
     stockHistoryError,
     stockHistoryFilters,
+    historyItems,
+    selectedHistoryIds,
     activeTasks,
     markdownDrawerOpen,
     setQuery,
