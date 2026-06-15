@@ -51,6 +51,12 @@ export interface PortfolioPositionItem {
   stockName?: string | null;
 }
 
+export interface PortfolioPositionAnalysisRequest {
+  accountId?: number;
+  analysisPhase?: 'auto' | 'premarket' | 'intraday' | 'postmarket';
+  force?: boolean;
+}
+
 export interface PortfolioAccountSnapshot {
   accountId: number;
   accountName: string;

@@ -23,7 +23,7 @@ class ConversationSession:
     created_at: datetime = field(default_factory=datetime.now)
     last_active: datetime = field(default_factory=datetime.now)
 
-    def add_message(self, role: str, content: str, original_message_id: str = None):
+    def add_message(self, role: str, content: str, original_message_id: str = None) -> int:
         """Add a message to the session history.
         
         Args:
@@ -31,25 +31,24 @@ class ConversationSession:
             content: Message content
             original_message_id: Original platform message ID (for tag mapping)
         """
-        # 保存消息并获取数据库ID
         db_message_id = get_db().save_conversation_message(self.session_id, role, content)
         self.last_active = datetime.now()
         
-        # 如果提供了原始消息ID，则更新标签ID映射
         if original_message_id and db_message_id:
             try:
                 from src.tags_manager import get_tags_manager
                 tags_manager = get_tags_manager()
-                # 尝试将原始消息ID映射到数据库消息ID
                 tags_manager.update_message_id_mapping(
                     old_message_id=original_message_id,
                     new_message_id=str(db_message_id),
-                    platform="feishu"  # 这里暂时硬编码，可以根据实际情况调整
+                    platform="feishu"
                 )
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"更新消息ID映射失败: {e}")
+        
+        return db_message_id
 
     def update_context(self, key: str, value: Any):
         """Update session context."""
@@ -83,10 +82,10 @@ class ConversationManager:
 
             return self._sessions[session_id]
 
-    def add_message(self, session_id: str, role: str, content: str, original_message_id: str = None):
+    def add_message(self, session_id: str, role: str, content: str, original_message_id: str = None) -> int:
         """Add a message to a session."""
         session = self.get_or_create(session_id)
-        session.add_message(role, content, original_message_id)
+        return session.add_message(role, content, original_message_id)
 
     def get_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get message history for a session."""

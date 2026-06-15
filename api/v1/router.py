@@ -11,7 +11,22 @@ API v1 路由聚合
 
 from fastapi import APIRouter
 
-from api.v1.endpoints import alerts, analysis, auth, history, stocks, backtest, system_config, agent, usage, portfolio, recommendations
+from api.v1.endpoints import (
+    agent,
+    alerts,
+    alphasift,
+    analysis,
+    auth,
+    backtest,
+    decision_signals,
+    health,
+    history,
+    portfolio,
+    recommendations,
+    stocks,
+    system_config,
+    usage,
+)
 
 # 创建 v1 版本主路由
 router = APIRouter(prefix="/api/v1")
@@ -80,4 +95,21 @@ router.include_router(
     recommendations.router,
     prefix="/recommendations",
     tags=["Recommendations"]
+)
+
+router.include_router(
+    decision_signals.router,
+    prefix="/decision-signals",
+    tags=["DecisionSignals"]
+)
+
+router.include_router(
+    alphasift.router,
+    prefix="/alphasift",
+    tags=["AlphaSift"]
+)
+
+router.include_router(
+    health.router,
+    tags=["Health"]
 )

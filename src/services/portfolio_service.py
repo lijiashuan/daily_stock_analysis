@@ -1618,6 +1618,18 @@ class PortfolioService:
                     provider=provider,
                 )
 
+        close = self.repo.get_latest_close_with_date(symbol=symbol, as_of=as_of_date)
+        if close is not None:
+            close_price, close_date = close
+            if close_price > 0:
+                return _ResolvedPositionPrice(
+                    price=float(close_price),
+                    source="history_close",
+                    price_date=close_date,
+                    is_stale=close_date < as_of_date,
+                    is_available=True,
+                )
+
         return _ResolvedPositionPrice(
             price=0.0,
             source="missing",

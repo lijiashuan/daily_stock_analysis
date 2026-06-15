@@ -1,15 +1,10 @@
 import type React from 'react';
-import { useEffect, useState, useCallback } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { historyApi } from '../../api/history';
-import { Drawer } from '../common/Drawer';
-import { Tooltip } from '../common/Tooltip';
-import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { useCallback, useState } from 'react';
 import type { ReportLanguage } from '../../types/analysis';
-import { markdownToPlainText } from '../../utils/markdown';
+import { Drawer } from '../common/Drawer';
+import { ReportMarkdownPanel } from './ReportMarkdownPanel';
 
-interface ReportMarkdownProps {
+export interface ReportMarkdownProps {
   recordId: number;
   stockName: string;
   stockCode: string;
@@ -18,8 +13,8 @@ interface ReportMarkdownProps {
 }
 
 /**
- * Markdown report drawer component
- * Uses common Drawer component to display full Markdown format analysis report
+ * Compatibility wrapper for direct ReportMarkdown usage.
+ * HomePage uses ReportMarkdownDrawer to lazy-load the panel.
  */
 export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   recordId,
@@ -28,19 +23,12 @@ export const ReportMarkdown: React.FC<ReportMarkdownProps> = ({
   onClose,
   reportLanguage = 'zh',
 }) => {
-  const text = getReportText(normalizeReportLanguage(reportLanguage));
-  const loadReportFailedText = text.loadReportFailed;
-  const [content, setContent] = useState<string>('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(true);
   const [copiedType, setCopiedType] = useState<'markdown' | 'text' | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
 
-  // Handle close with animation
   const handleClose = useCallback(() => {
     setIsOpen(false);
-    // Delay actual close to allow animation to complete
     setTimeout(onClose, 300);
   }, [onClose]);
 
