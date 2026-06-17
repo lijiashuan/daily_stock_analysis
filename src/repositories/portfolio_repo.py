@@ -25,6 +25,7 @@ from src.storage import (
     PortfolioPositionLot,
     PortfolioTrade,
     StockDaily,
+    StockNote,
 )
 
 logger = logging.getLogger(__name__)

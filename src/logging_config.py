@@ -130,7 +130,15 @@ def setup_logging(
         LOG_FORMAT, LOG_DATE_FORMAT, relative_to=project_root
     )
     # Handler 1: 控制台输出
-    console_handler = logging.StreamHandler(sys.stdout)
+    # 在 Windows 下 stdout 可能使用 GBK 编码，无法输出 emoji 等 Unicode 字符
+    # 通过 errors='replace' 避免编码异常导致日志中断
+    console_stream = sys.stdout
+    if hasattr(console_stream, 'reconfigure'):
+        try:
+            console_stream.reconfigure(errors='replace')
+        except Exception:
+            pass
+    console_handler = logging.StreamHandler(console_stream)
     console_handler.setLevel(level)
     console_handler.setFormatter(rel_formatter)
     root_logger.addHandler(console_handler)
