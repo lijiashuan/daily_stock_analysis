@@ -975,6 +975,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             # 自动执行数据库迁移（必须在 _initialized=True 之后，因为 _auto_migrate 内部调用 get_session）
             self._auto_migrate()
 
+            # 数据库完整性检查与自动备份
+            self._perform_integrity_check_and_backup()
+
             # 注册退出钩子，确保程序退出时关闭数据库连接
             atexit.register(DatabaseManager._cleanup_engine, self._engine)
         except Exception:
@@ -1059,6 +1062,50 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 logger.debug("数据库引擎已清理")
         except Exception as e:
             logger.warning(f"清理数据库引擎时出错: {e}")
+
+    def _perform_integrity_check_and_backup(self) -> None:
+        """执行数据库完整性检查和启动备份"""
+        if not self._sqlite_file_db:
+            return
+
+        from pathlib import Path
+        from src.config import get_config
+        from src.storage_backup import (
+            check_database_integrity,
+            attempt_restore_from_backup,
+            perform_startup_backup_with_cleanup,
+        )
+
+        config = get_config()
+        db_path = config.database_path
+
+        if config.db_integrity_check_on_startup:
+            is_ok, error_msg = check_database_integrity(db_path)
+            if not is_ok:
+                logger.error("数据库完整性检查失败，尝试从本地备份恢复...")
+                backup_dir = Path(config.db_local_backup_dir)
+                if not attempt_restore_from_backup(db_path, backup_dir):
+                    logger.critical("数据库损坏且无法从备份恢复，请手动处理！错误: %s", error_msg)
+                return
+
+        if config.db_auto_backup_enabled and config.db_backup_on_startup:
+            try:
+                local_backup_dir = Path(config.db_local_backup_dir)
+                cloud_backup_dir = None
+                if config.db_cloud_sync_enabled and config.db_cloud_backup_dir:
+                    cloud_backup_dir = Path(config.db_cloud_backup_dir)
+                    if not cloud_backup_dir.exists():
+                        cloud_backup_dir.mkdir(parents=True, exist_ok=True)
+
+                perform_startup_backup_with_cleanup(
+                    db_path=db_path,
+                    local_backup_dir=local_backup_dir,
+                    local_keep_days=config.db_local_keep_days,
+                    cloud_backup_dir=cloud_backup_dir,
+                    cloud_keep_days=config.db_cloud_keep_days,
+                )
+            except Exception as exc:
+                logger.warning("启动备份失败: %s", exc)
 
     def _auto_migrate(self):
         """自动执行数据库迁移（幂等操作）"""

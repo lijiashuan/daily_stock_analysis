@@ -1017,6 +1017,19 @@ class PortfolioRepository:
             if newer_trade > 0:
                 return None
 
+            # 额外检查：当日是否有新的交易入库（防御 created_at 时间戳不一致的情况）
+            same_day_trades = session.execute(
+                select(func.count(PortfolioTrade.id)).where(
+                    and_(
+                        PortfolioTrade.account_id == account_id,
+                        PortfolioTrade.trade_date == snapshot_date,
+                        PortfolioTrade.created_at <= cutoff,
+                    )
+                )
+            ).scalar_one()
+            if same_day_trades > 0 and snapshot.payload is None:
+                return None
+
             newer_cash = session.execute(
                 select(func.count(PortfolioCashLedger.id)).where(
                     and_(

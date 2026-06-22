@@ -61,7 +61,8 @@ import argparse
 import logging
 import sys
 import time
-import uuid
+import threading
+import time as time_module
 from datetime import date, datetime, timezone, timedelta
 
 from data_provider.base import canonical_stock_code
@@ -1221,6 +1222,29 @@ def main() -> int:
         monitor_thread = threading.Thread(target=price_monitor_loop, daemon=True, name="PriceMonitor")
         monitor_thread.start()
         logger.info("[PriceMonitor] 监盘后台线程已启动")
+
+        # 启动定期 WAL checkpoint 后台线程
+        wal_checkpoint_interval = getattr(config, 'db_periodic_wal_checkpoint_interval', 30)
+        if wal_checkpoint_interval > 0:
+            def wal_checkpoint_loop():
+                logger.info("[WALCheckpoint] 定期 WAL 合并已启动，间隔: %d 分钟", wal_checkpoint_interval)
+                while True:
+                    for _ in range(wal_checkpoint_interval * 60):
+                        time_module.sleep(1)
+                    try:
+                        from src.storage import DatabaseManager
+                        db = DatabaseManager.get_instance()
+                        if db._is_sqlite_engine and db._engine is not None:
+                            with db._engine.connect() as conn:
+                                conn.execute(text("PRAGMA wal_checkpoint(PASSIVE)"))
+                                conn.commit()
+                            logger.debug("[WALCheckpoint] PASSIVE checkpoint 完成")
+                    except Exception as exc:
+                        logger.warning("[WALCheckpoint] checkpoint 失败: %s", exc)
+
+            wal_thread = threading.Thread(target=wal_checkpoint_loop, daemon=True, name="WALCheckpoint")
+            wal_thread.start()
+            logger.info("[WALCheckpoint] WAL checkpoint 后台线程已启动")
         
         logger.info("按 Ctrl+C 退出...")
         try:

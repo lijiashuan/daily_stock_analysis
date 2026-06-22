@@ -140,6 +140,11 @@ const PortfolioPage: React.FC = () => {
   const [brokerLoadWarning, setBrokerLoadWarning] = useState<string | null>(null);
   const [importEventType, setImportEventType] = useState<'trade' | 'cash' | 'corporate'>('trade');
 
+  const [backupStatus, setBackupStatus] = useState<Record<string, unknown> | null>(null);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupMessageTone, setBackupMessageTone] = useState<'success' | 'warning' | 'danger'>('success');
+
   // 自动监盘配置
   const [monitorEnabled, setMonitorEnabled] = useState(false);
   const [monitorInterval, setMonitorInterval] = useState('5');
@@ -1012,6 +1017,51 @@ const PortfolioPage: React.FC = () => {
       }
     }
   };
+
+  const loadBackupStatus = useCallback(async () => {
+    try {
+      const data = await portfolioApi.getBackupStatus();
+      setBackupStatus(data);
+    } catch {
+      // 静默失败，备份状态非关键
+    }
+  }, []);
+
+  const handleBackup = async () => {
+    setBackupLoading(true);
+    setBackupMessage(null);
+    try {
+      const data = await portfolioApi.triggerBackup();
+      setBackupMessageTone(data.success ? 'success' : 'warning');
+      setBackupMessage(data.message as string);
+      await loadBackupStatus();
+    } catch (err: any) {
+      setBackupMessageTone('danger');
+      setBackupMessage(err?.message || '备份失败');
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setBackupLoading(true);
+    setBackupMessage(null);
+    try {
+      const data = await portfolioApi.triggerSync();
+      setBackupMessageTone(data.success ? 'success' : (data.conflictCount as number) > 0 ? 'warning' : 'danger');
+      setBackupMessage(data.message as string);
+      await loadBackupStatus();
+    } catch (err: any) {
+      setBackupMessageTone('danger');
+      setBackupMessage(err?.message || '同步失败');
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadBackupStatus();
+  }, [loadBackupStatus]);
 
   return (
     <div className="portfolio-page min-h-screen space-y-4 p-4 md:p-6">
@@ -1895,6 +1945,62 @@ const PortfolioPage: React.FC = () => {
         {/* 右侧：券商 CSV 导入 + 事件记录 */}
         <Card padding="md">
           <div className="space-y-4">
+            {/* 备份与同步 */}
+            {backupStatus && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {text.backupTitle || '备份与同步'}
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {!!backupStatus.cloudEnabled && (
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                        {text.cloudOn || '云端同步'}
+                      </span>
+                    )}
+                    {(backupStatus.conflictCount as number) > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        {text.conflict || '冲突'} {backupStatus.conflictCount as number}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {!!backupStatus.lastLocalBackup && (
+                  <div className="text-xs text-white/40 mb-2">
+                    {text.lastBackup || '上次备份'}: {backupStatus.lastLocalBackup as string}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleBackup}
+                    disabled={backupLoading}
+                    className="rounded-lg bg-white/10 px-3 py-1 text-xs text-foreground hover:bg-white/20 transition-colors disabled:opacity-50"
+                  >
+                    {backupLoading ? (text.backingUp || '备份中...') : (text.backupNow || '立即备份')}
+                  </button>
+                  {!!backupStatus.cloudEnabled && (
+                    <button
+                      type="button"
+                      onClick={handleSync}
+                      disabled={backupLoading}
+                      className="rounded-lg bg-blue-500/20 px-3 py-1 text-xs text-blue-400 hover:bg-blue-500/30 transition-colors disabled:opacity-50"
+                    >
+                      {backupLoading ? (text.syncing || '同步中...') : (text.syncNow || '同步云端')}
+                    </button>
+                  )}
+                </div>
+                {backupMessage && (
+                  <InlineAlert
+                    variant={getFxRefreshFeedbackVariant(backupMessageTone === 'danger' ? 'warning' : backupMessageTone)}
+                    message={backupMessage}
+                    className="mt-2 rounded-xl px-3 py-2 text-xs shadow-none"
+                  />
+                )}
+              </div>
+            )}
             {/* 券商 CSV 导入区域 */}
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-3">券商 CSV 导入</h3>

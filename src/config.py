@@ -879,6 +879,18 @@ class Config:
     # 是否保存分析上下文快照（用于历史回溯）
     save_context_snapshot: bool = True
 
+    # === 数据库稳定性增强配置 ===
+    db_integrity_check_on_startup: bool = True
+    db_auto_backup_enabled: bool = True
+    db_local_backup_dir: str = "./data/backups"
+    db_local_keep_days: int = 7
+    db_cloud_backup_dir: str = ""
+    db_cloud_keep_days: int = 30
+    db_cloud_sync_enabled: bool = False
+    db_backup_on_startup: bool = True
+    db_periodic_wal_checkpoint_interval: int = 30
+    portfolio_memory_cache_ttl: int = 300
+
     # === 回测配置 ===
     backtest_enabled: bool = True
     backtest_eval_window_days: int = 10
@@ -1685,6 +1697,27 @@ class Config:
                 minimum=0.0,
             ),
             save_context_snapshot=os.getenv('SAVE_CONTEXT_SNAPSHOT', 'true').lower() == 'true',
+            # 数据库稳定性增强配置
+            db_integrity_check_on_startup=os.getenv('DB_INTEGRITY_CHECK_ON_STARTUP', 'true').lower() == 'true',
+            db_auto_backup_enabled=os.getenv('DB_AUTO_BACKUP_ENABLED', 'true').lower() == 'true',
+            db_local_backup_dir=os.getenv('DB_LOCAL_BACKUP_DIR', './data/backups'),
+            db_local_keep_days=parse_env_int(os.getenv('DB_LOCAL_KEEP_DAYS'), 7, field_name='DB_LOCAL_KEEP_DAYS', minimum=1),
+            db_cloud_backup_dir=os.getenv('DB_CLOUD_BACKUP_DIR', ''),
+            db_cloud_keep_days=parse_env_int(os.getenv('DB_CLOUD_KEEP_DAYS'), 30, field_name='DB_CLOUD_KEEP_DAYS', minimum=1),
+            db_cloud_sync_enabled=os.getenv('DB_CLOUD_SYNC_ENABLED', 'false').lower() == 'true',
+            db_backup_on_startup=os.getenv('DB_BACKUP_ON_STARTUP', 'true').lower() == 'true',
+            db_periodic_wal_checkpoint_interval=parse_env_int(
+                os.getenv('DB_PERIODIC_WAL_CHECKPOINT_INTERVAL'),
+                30,
+                field_name='DB_PERIODIC_WAL_CHECKPOINT_INTERVAL',
+                minimum=0,
+            ),
+            portfolio_memory_cache_ttl=parse_env_int(
+                os.getenv('PORTFOLIO_MEMORY_CACHE_TTL'),
+                300,
+                field_name='PORTFOLIO_MEMORY_CACHE_TTL',
+                minimum=0,
+            ),
             backtest_enabled=os.getenv('BACKTEST_ENABLED', 'true').lower() == 'true',
             backtest_eval_window_days=parse_env_int(os.getenv('BACKTEST_EVAL_WINDOW_DAYS'), 10, field_name='BACKTEST_EVAL_WINDOW_DAYS', minimum=1),
             backtest_min_age_days=parse_env_int(os.getenv('BACKTEST_MIN_AGE_DAYS'), 14, field_name='BACKTEST_MIN_AGE_DAYS', minimum=1),

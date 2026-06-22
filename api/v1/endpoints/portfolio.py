@@ -957,4 +957,135 @@ def remove_note(account_id: int, symbol: str, cost_method: str = 'fifo',
     ok = repo_delete_note(db, account_id, symbol, cost_method)
     if not ok:
         raise HTTPException(status_code=404, detail="Note not found")
-    return {"ok": True}
+
+
+# ============================================================
+# 备份与同步端点
+# ============================================================
+
+from pathlib import Path as _Path
+from src.config import get_config as _get_config
+from src.storage_backup import (
+    get_backup_status as _get_backup_status,
+    perform_startup_backup_with_cleanup as _perform_backup,
+)
+from src.storage_sync import (
+    analyze_sync_diff as _analyze_sync_diff,
+    perform_full_sync as _perform_full_sync,
+)
+from pydantic import BaseModel as _BaseModel, Field as _Field
+
+
+class BackupStatusResponse(_BaseModel):
+    last_local_backup: Optional[str] = None
+    last_local_backup_path: Optional[str] = None
+    local_backup_count: int = 0
+    cloud_backup_count: int = 0
+    cloud_enabled: bool = False
+    cloud_backup_found: bool = False
+    cloud_backup_path: Optional[str] = None
+    local_only_count: int = 0
+    cloud_only_count: int = 0
+    conflict_count: int = 0
+
+
+class BackupTriggerResponse(_BaseModel):
+    success: bool
+    backup_path: Optional[str] = None
+    message: str = ""
+
+
+class SyncResponse(_BaseModel):
+    success: bool
+    sync_time: Optional[str] = None
+    cloud_backup_found: bool = False
+    imported: int = 0
+    cloud_upload: Optional[str] = None
+    conflict_count: int = 0
+    message: str = ""
+
+
+@router.get("/backup/status", response_model=BackupStatusResponse)
+def backup_status():
+    cfg = _get_config()
+    local_dir = _Path(cfg.db_local_backup_dir)
+    cloud_dir = _Path(cfg.db_cloud_backup_dir) if cfg.db_cloud_sync_enabled and cfg.db_cloud_backup_dir else None
+
+    status = _get_backup_status(local_dir, cloud_dir)
+    status["cloud_enabled"] = cloud_dir is not None
+
+    if cloud_dir and cloud_dir.exists():
+        diff = _analyze_sync_diff(cfg.database_path, cloud_dir)
+        status["cloud_backup_found"] = diff.get("cloud_backup_found", False)
+        status["cloud_backup_path"] = diff.get("cloud_backup_path")
+        status["local_only_count"] = diff.get("summary", {}).get("local_only_count", 0)
+        status["cloud_only_count"] = diff.get("summary", {}).get("cloud_only_count", 0)
+        status["conflict_count"] = diff.get("summary", {}).get("conflict_count", 0)
+    else:
+        status["cloud_backup_found"] = False
+        status["cloud_backup_path"] = None
+        status["local_only_count"] = 0
+        status["cloud_only_count"] = 0
+        status["conflict_count"] = 0
+
+    return status
+
+
+@router.post("/backup/trigger", response_model=BackupTriggerResponse)
+def backup_trigger():
+    cfg = _get_config()
+    db_path = cfg.database_path
+    if not _Path(db_path).exists():
+        return BackupTriggerResponse(success=False, message="数据库文件不存在")
+
+    local_dir = _Path(cfg.db_local_backup_dir)
+    cloud_dir = _Path(cfg.db_cloud_backup_dir) if cfg.db_cloud_sync_enabled and cfg.db_cloud_backup_dir else None
+
+    try:
+        result = _perform_backup(
+            db_path=db_path,
+            local_backup_dir=local_dir,
+            local_keep_days=cfg.db_local_keep_days,
+            cloud_backup_dir=cloud_dir,
+            cloud_keep_days=cfg.db_cloud_keep_days,
+        )
+        if result:
+            return BackupTriggerResponse(success=True, backup_path=result, message="备份完成")
+        else:
+            return BackupTriggerResponse(success=True, message="数据库未变化，跳过备份")
+    except Exception as exc:
+        return BackupTriggerResponse(success=False, message=str(exc))
+
+
+@router.post("/backup/sync", response_model=SyncResponse)
+def backup_sync():
+    cfg = _get_config()
+    db_path = cfg.database_path
+    if not _Path(db_path).exists():
+        return SyncResponse(success=False, message="数据库文件不存在")
+
+    if not cfg.db_cloud_sync_enabled or not cfg.db_cloud_backup_dir:
+        return SyncResponse(success=False, message="云端同步未启用")
+
+    cloud_dir = _Path(cfg.db_cloud_backup_dir)
+
+    try:
+        result = _perform_full_sync(
+            local_db_path=db_path,
+            cloud_backup_dir=cloud_dir,
+            local_keep_days=cfg.db_local_keep_days,
+            cloud_keep_days=cfg.db_cloud_keep_days,
+        )
+        merge_result = result.get("merge", {})
+        return SyncResponse(
+            success=True,
+            sync_time=result.get("sync_time"),
+            cloud_backup_found=result.get("cloud_backup_found", False),
+            imported=merge_result.get("imported", 0),
+            cloud_upload=result.get("cloud_upload"),
+            conflict_count=result.get("conflict_count", 0),
+            message="同步完成" if not result.get("conflicts_exist") else "同步完成，但存在冲突数据",
+        )
+    except Exception as exc:
+        logger.error("同步失败: %s", exc, exc_info=True)
+        return SyncResponse(success=False, message=str(exc))

@@ -134,6 +134,7 @@ export const portfolioApi = {
   async getSnapshot(query: SnapshotQuery = {}): Promise<PortfolioSnapshotResponse> {
     const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/snapshot', {
       params: buildSnapshotParams(query),
+      timeout: 120000,
     });
     return toCamelCase<PortfolioSnapshotResponse>(response.data);
   },
@@ -373,6 +374,21 @@ export const portfolioApi = {
       payload.cost_method = body.costMethod;
     }
     const response = await apiClient.put('/api/v1/portfolio/note', payload);
+    return toCamelCase(response.data);
+  },
+
+  async getBackupStatus(): Promise<Record<string, unknown>> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/backup/status');
+    return toCamelCase(response.data);
+  },
+
+  async triggerBackup(): Promise<Record<string, unknown>> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/backup/trigger');
+    return toCamelCase(response.data);
+  },
+
+  async triggerSync(): Promise<Record<string, unknown>> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/backup/sync');
     return toCamelCase(response.data);
   },
 };

@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import logging
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -87,6 +88,21 @@ class PortfolioService:
 
     def __init__(self, repo: Optional[PortfolioRepository] = None):
         self.repo = repo or PortfolioRepository()
+        self._memory_cache: Dict[Tuple[int, str, str], Any] = {}
+        self._cache_ttl: int = 300
+
+    def _get_memory_cache_key(self, account_id: int, cost_method: str, as_of_date: date) -> Tuple[int, str, str]:
+        return (account_id, cost_method, as_of_date.isoformat())
+
+    def invalidate_cache(self, account_id: Optional[int] = None) -> None:
+        if account_id is not None:
+            keys_to_remove = [k for k in self._memory_cache if k[0] == account_id]
+        else:
+            keys_to_remove = list(self._memory_cache.keys())
+        for k in keys_to_remove:
+            self._memory_cache.pop(k, None)
+        if keys_to_remove:
+            logger.debug("内存缓存已失效: %d 条", len(keys_to_remove))
 
     # ------------------------------------------------------------------
     # Account CRUD
@@ -455,6 +471,8 @@ class PortfolioService:
                 return {"id": int(row.id)}
         except (DuplicateTradeUidError, DuplicateTradeDedupHashError) as exc:
             raise PortfolioConflictError(str(exc)) from exc
+        finally:
+            self.invalidate_cache(account_id=account_id)
 
     def record_cash_ledger(
         self,
@@ -471,19 +489,22 @@ class PortfolioService:
             raise ValueError("direction must be in or out")
         if amount <= 0:
             raise ValueError("amount must be > 0")
-        with self.repo.portfolio_write_session() as session:
-            account = self._require_active_account_in_session(session=session, account_id=account_id)
-            currency_norm = self._normalize_currency(currency or account.base_currency)
-            row = self.repo.add_cash_ledger_in_session(
-                session=session,
-                account_id=account_id,
-                event_date=event_date,
-                direction=direction_norm,
-                amount=float(amount),
-                currency=currency_norm,
-                note=(note or "").strip() or None,
-            )
-            return {"id": int(row.id)}
+        try:
+            with self.repo.portfolio_write_session() as session:
+                account = self._require_active_account_in_session(session=session, account_id=account_id)
+                currency_norm = self._normalize_currency(currency or account.base_currency)
+                row = self.repo.add_cash_ledger_in_session(
+                    session=session,
+                    account_id=account_id,
+                    event_date=event_date,
+                    direction=direction_norm,
+                    amount=float(amount),
+                    currency=currency_norm,
+                    note=(note or "").strip() or None,
+                )
+                return {"id": int(row.id)}
+        finally:
+            self.invalidate_cache(account_id=account_id)
 
     def record_corporate_action(
         self,
@@ -508,26 +529,29 @@ class PortfolioService:
         if action_type_norm == "split_adjustment":
             if split_ratio is None or split_ratio <= 0:
                 raise ValueError("split_ratio must be > 0 for split_adjustment")
-        with self.repo.portfolio_write_session() as session:
-            account = self._require_active_account_in_session(session=session, account_id=account_id)
-            market_norm = self._normalize_market(market or account.market)
-            currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
-            symbol_norm = self._normalize_symbol_for_storage(symbol)
-            if not symbol_norm:
-                raise ValueError("symbol is required")
-            row = self.repo.add_corporate_action_in_session(
-                session=session,
-                account_id=account_id,
-                symbol=symbol_norm,
-                market=market_norm,
-                currency=currency_norm,
-                effective_date=effective_date,
-                action_type=action_type_norm,
-                cash_dividend_per_share=cash_dividend_per_share,
-                split_ratio=split_ratio,
-                note=(note or "").strip() or None,
-            )
-            return {"id": int(row.id)}
+        try:
+            with self.repo.portfolio_write_session() as session:
+                account = self._require_active_account_in_session(session=session, account_id=account_id)
+                market_norm = self._normalize_market(market or account.market)
+                currency_norm = self._normalize_currency(currency or self._default_currency_for_market(market_norm))
+                symbol_norm = self._normalize_symbol_for_storage(symbol)
+                if not symbol_norm:
+                    raise ValueError("symbol is required")
+                row = self.repo.add_corporate_action_in_session(
+                    session=session,
+                    account_id=account_id,
+                    symbol=symbol_norm,
+                    market=market_norm,
+                    currency=currency_norm,
+                    effective_date=effective_date,
+                    action_type=action_type_norm,
+                    cash_dividend_per_share=cash_dividend_per_share,
+                    split_ratio=split_ratio,
+                    note=(note or "").strip() or None,
+                )
+                return {"id": int(row.id)}
+        finally:
+            self.invalidate_cache(account_id=account_id)
 
     def delete_trade_event(self, trade_id: int) -> bool:
         with self.repo.portfolio_write_session() as session:
@@ -687,6 +711,17 @@ class PortfolioService:
         else:
             account_rows = self.repo.list_accounts(include_inactive=False)
 
+        cache_key = self._get_memory_cache_key(
+            account_id or 0, method, as_of_date,
+        )
+        if self._cache_ttl > 0:
+            cached = self._memory_cache.get(cache_key)
+            if cached is not None:
+                cached_time, cached_result = cached
+                if (time.time() - cached_time) < self._cache_ttl:
+                    logger.debug("命中内存缓存: key=%s", cache_key)
+                    return cached_result
+
         accounts_payload: List[Dict[str, Any]] = []
         aggregate_currency = "CNY"
         aggregate = {
@@ -803,7 +838,7 @@ class PortfolioService:
                 ]
             )
 
-        return {
+        result = {
             "as_of": as_of_date.isoformat(),
             "cost_method": method,
             "currency": aggregate_currency,
@@ -818,6 +853,12 @@ class PortfolioService:
             "fx_stale": aggregate["fx_stale"],
             "accounts": accounts_payload,
         }
+
+        if self._cache_ttl > 0:
+            import time as _time
+            self._memory_cache[cache_key] = (_time.time(), result)
+
+        return result
 
     def get_trade_matches(
         self,

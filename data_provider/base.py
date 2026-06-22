@@ -578,6 +578,7 @@ class DataFetcherManager:
 
     _instance: Optional['DataFetcherManager'] = None
     _lock = RLock()
+    _initialized: bool = False
 
     def __new__(cls, fetchers: Optional[List[BaseFetcher]] = None):
         """单例模式实现"""
@@ -585,7 +586,6 @@ class DataFetcherManager:
             with cls._lock:
                 if cls._instance is None:
                     instance = super().__new__(cls)
-                    instance.__init__(fetchers)
                     cls._instance = instance
         return cls._instance
 
@@ -594,6 +594,7 @@ class DataFetcherManager:
         """重置单例（主要用于测试）"""
         with cls._lock:
             cls._instance = None
+            cls._initialized = False
 
     _DAILY_MARKET_FETCHER_SUPPORT = {
         "EfinanceFetcher": {"cn"},
@@ -616,6 +617,8 @@ class DataFetcherManager:
         Args:
             fetchers: 数据源列表（可选，默认按优先级自动创建）
         """
+        if self._initialized:
+            return
         self._fetchers: List[BaseFetcher] = []
         self._fetchers_lock = RLock()
         self._fetchers_by_name: Dict[str, BaseFetcher] = {}
@@ -640,6 +643,7 @@ class DataFetcherManager:
         self._fundamental_cache_lock = RLock()
         self._fundamental_timeout_worker_limit = 8
         self._fundamental_timeout_slots = BoundedSemaphore(self._fundamental_timeout_worker_limit)
+        self._initialized = True
 
     def _ensure_concurrency_guards(self) -> None:
         """Lazily initialize thread-safety primitives for test scaffolds using __new__."""
