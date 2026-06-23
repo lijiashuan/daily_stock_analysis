@@ -1227,7 +1227,8 @@ const ChatPage: React.FC = () => {
       id: msg.id,
       content: msg.content.length > 50 ? msg.content.slice(0, 50) + '...' : msg.content,
       fullContent: msg.content,
-    }));
+    }))
+    .reverse();
 
   const sidebarContent = (
     <>
