@@ -196,11 +196,19 @@ def _guard_tool_stock_scope(tool_registry: ToolRegistry, tool_name: str, argumen
     if requested and (requested == expected or requested in allowed):
         return None
 
+    allowed_list = sorted(allowed)
+    hint = (
+        f"本回合仅允许查询以下股票: {', '.join(allowed_list)}。"
+        f"请从这些股票中选择一个进行查询。"
+        if allowed_list
+        else "本回合没有允许查询的股票。"
+    )
     return {
         "error": "stock_scope_violation",
         "expected_stock_code": expected,
         "requested_stock_code": requested,
-        "allowed_stock_codes": sorted(allowed),
+        "allowed_stock_codes": allowed_list,
+        "message": hint,
         "retriable": False,
     }
 

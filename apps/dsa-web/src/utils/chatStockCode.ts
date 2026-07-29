@@ -6,6 +6,45 @@ const LOWERCASE_TICKER_CONTEXT_RE = /换成|改看|分析|看看|研究|诊断|�
 const CONTEXTUAL_INDICATOR_TOKENS = new Set(['MA']);
 const INDICATOR_CONTEXT_RE = /指标|均线|移动平均|排列|多头|空头|金叉|死叉|支撑|压力|MA\d|SMA|EMA/i;
 
+// Chinese stock name abbreviation -> code mapping.
+// Maps common short forms like "茅台" -> "600519" (full name: "贵州茅台").
+// This mirrors the backend's STOCK_NAME_MAP partial-name resolution.
+const STOCK_NAME_ABBREV_MAP: Record<string, string> = {
+  // 白酒
+  '茅台': '600519', '贵州茅台': '600519',
+  '五粮液': '000858',
+  '汾酒': '600809', '山西汾酒': '600809',
+  // 新能源
+  '宁德': '300750', '宁德时代': '300750',
+  '比亚迪': '002594',
+  '隆基': '601012', '隆基绿能': '601012',
+  // 金融
+  '平安银行': '000001', '招商银行': '600036',
+  '兴业银行': '601166', '工商银行': '601398',
+  '农业银行': '601288', '交通银行': '601328',
+  '中国平安': '601318', '中国太保': '601601',
+  '中信证券': '600030', '国泰海通': '601211',
+  '东方财富': '300059',
+  // 科技
+  '恒瑞医药': '600276', '立讯精密': '002475',
+  '海康威视': '002415', '国电南瑞': '600406',
+  '中航沈飞': '600760', '中国船舶': '600150',
+  // 消费
+  '伊利股份': '600887', '海尔智家': '600690',
+  '上汽集团': '600104', '赛力斯': '601127',
+  // 能源
+  '长江电力': '600900', '中国石化': '600028',
+  '中国神华': '601088', '陕西煤业': '601225',
+  '北方稀土': '600111', '万华化学': '600309',
+  // 淳中科技（用户关注的）
+  '淳中': '603516', '淳中科技': '603516',
+  // 兆易创新
+  '兆易': '603986', '兆易创新': '603986',
+  // 其他常见
+  '三一重工': '600031', '中国联通': '600050',
+  '华电新能': '600930',
+};
+
 // Mirrors backend _COMMON_WORDS for #1596 free-text extraction only.
 // Explicit validation via validateStockCode() intentionally keeps its original contract.
 const FREE_TEXT_TICKER_DENYLIST = new Set([
@@ -109,5 +148,21 @@ export function extractStockCodesFromMessage(message: string): string[] {
       stockCodes.push(stockCode);
     }
   }
+
+  // Chinese stock name resolution (e.g., "茅台" -> "600519")
+  // This mirrors the backend's _extract_stock_names_from_text logic.
+  if (stockCodes.length === 0) {
+    const sortedNames = Object.keys(STOCK_NAME_ABBREV_MAP).sort((a, b) => b.length - a.length);
+    for (const name of sortedNames) {
+      if (message.includes(name)) {
+        const code = normalizeStockCode(STOCK_NAME_ABBREV_MAP[name]);
+        if (!seen.has(code)) {
+          seen.add(code);
+          stockCodes.push(code);
+        }
+      }
+    }
+  }
+
   return stockCodes;
 }

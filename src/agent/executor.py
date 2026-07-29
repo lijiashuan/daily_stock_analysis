@@ -585,6 +585,11 @@ class AgentExecutor:
             language_section=_build_language_section(report_language, chat_mode=True),
         )
 
+        # Append stock scope hint to system prompt (e.g., multi-stock compare mode)
+        scope_hint = scope_resolution.stock_scope.as_llm_hint() if scope_resolution.stock_scope else ""
+        if scope_hint:
+            system_prompt += f"\n\n## 查询范围\n{scope_hint}\n"
+
         # Build tool declarations in OpenAI format (litellm handles all providers)
         tool_decls = self.tool_registry.to_openai_tools()
 

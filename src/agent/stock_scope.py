@@ -25,7 +25,7 @@ SWITCH_CLEANUP_KEYS = {
 }
 
 _STRONG_COMPARE_PATTERN = re.compile(r"比较|对比|vs\b|和[^，。,.!?！？]{0,40}比", re.IGNORECASE)
-_WEAK_COMPARE_HINT_PATTERN = re.compile(r"差异(?!化)|区别|不同|相比|对照|比一比")
+_WEAK_COMPARE_HINT_PATTERN = re.compile(r"差异(?!化)|区别|不同|相比|对照|比一比|和")
 _CHOICE_COMPARE_PATTERN = re.compile(r"哪个|哪只|哪一个|谁更|更值得|更适合|怎么选|选哪|二选一")
 _LINKED_COMPARE_PATTERN = re.compile(
     r"(?:和|与|跟|同)(?P<body>[^，。,.!?！？]{0,40})(?:差异(?!化)|区别|不同|相比|对照|比一比)"
@@ -38,6 +38,10 @@ _INDICATOR_CONTEXT_PATTERN = re.compile(
     r"指标|均线|移动平均|排列|多头|空头|金叉|死叉|支撑|压力|MA\d|SMA|EMA",
     re.IGNORECASE,
 )
+
+# Lazy-loaded stock name -> code reverse index
+_STOCK_NAME_REVERSE_MAP: Optional[Dict[str, str]] = None
+_STOCK_NAME_SORTED: Optional[List[str]] = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +58,24 @@ class StockScope:
             "allowed_stock_codes": sorted(self.allowed_stock_codes),
             "mode": self.mode,
         }
+
+    def as_llm_hint(self) -> str:
+        """Generate a human-readable hint for the LLM about the stock scope.
+
+        - compare mode: list all allowed stocks and instruct to query all
+        - switch mode: only the target stock is allowed
+        - maintain mode: no hint needed (single stock, business as usual)
+        """
+        if self.mode == "compare" and len(self.allowed_stock_codes) > 1:
+            stock_list = "、".join(sorted(self.allowed_stock_codes))
+            return (
+                f"本回合涉及多只股票分析，允许查询的股票范围：{stock_list}。\n"
+                f"请逐一调用 get_realtime_quote 和 get_daily_history 获取每只股票的行情数据，"
+                f"然后综合对比分析。"
+            )
+        if self.mode == "switch" and self.expected_stock_code:
+            return f"本回合已切换到股票 {self.expected_stock_code}，请仅查询该股票的数据。"
+        return ""
 
 
 @dataclass(frozen=True)
@@ -102,6 +124,84 @@ def _append_candidate(candidates: List[str], candidate: str, text: str = "") -> 
         candidates.append(normalized)
 
 
+def _contains_cjk(text: str) -> bool:
+    """Return True when text contains CJK (Chinese) characters."""
+    return any("\u3400" <= ch <= "\u9fff" for ch in text)
+
+
+def _build_stock_name_reverse_index() -> Dict[str, str]:
+    """Build name->code reverse map from STOCK_NAME_MAP, excluding ambiguous names."""
+    from src.data.stock_mapping import STOCK_NAME_MAP
+
+    name_to_codes: Dict[str, Set[str]] = {}
+    for code, name in STOCK_NAME_MAP.items():
+        if not name or not code:
+            continue
+        name_str = name.strip()
+        if not name_str:
+            continue
+        name_to_codes.setdefault(name_str, set()).add(code)
+
+    # Only include names that map to exactly one code (exclude ambiguous names)
+    return {
+        name: next(iter(codes))
+        for name, codes in name_to_codes.items()
+        if len(codes) == 1
+    }
+
+
+def _get_stock_name_index() -> tuple[Dict[str, str], List[str]]:
+    """Lazy-load and return (name_to_code_map, sorted_names_by_length)."""
+    global _STOCK_NAME_REVERSE_MAP, _STOCK_NAME_SORTED
+    if _STOCK_NAME_REVERSE_MAP is None:
+        _STOCK_NAME_REVERSE_MAP = _build_stock_name_reverse_index()
+        _STOCK_NAME_SORTED = sorted(
+            _STOCK_NAME_REVERSE_MAP.keys(),
+            key=len,
+            reverse=True,
+        )
+    return _STOCK_NAME_REVERSE_MAP, _STOCK_NAME_SORTED
+
+
+def _extract_stock_names_from_text(text: str) -> List[str]:
+    """Extract Chinese stock names from text and return their stock codes.
+
+    Uses longest-match-first strategy to handle overlapping names
+    (e.g., '阿里巴巴' matched before '阿里').
+
+    Also supports partial / fuzzy name matching for common abbreviations
+    (e.g., '茅台' -> '贵州茅台' -> '600519').
+    """
+    if not text or not _contains_cjk(text):
+        return []
+
+    name_to_code, sorted_names = _get_stock_name_index()
+    found_codes: Set[str] = set()
+    remaining = text
+
+    # First pass: exact name matching (longest first)
+    for name in sorted_names:
+        if name in remaining:
+            code = name_to_code[name]
+            found_codes.add(code)
+            remaining = remaining.replace(name, "")
+
+    # Second pass: partial name matching for common abbreviations.
+    # e.g., when user types "茅台" but the map only has "贵州茅台",
+    # check if any CJK token in the text is a substring of a stock name.
+    if not found_codes:
+        # Extract CJK sequences of 2+ characters (user's keywords)
+        cjk_tokens = re.findall(r'[\u4e00-\u9fff]{2,}', text)
+        for token in cjk_tokens:
+            for name, code in name_to_code.items():
+                # token is a substring of a full stock name, e.g. "茅台" in "贵州茅台"
+                if token in name:
+                    found_codes.add(code)
+                    break
+
+    return list(found_codes)
+
+
 def extract_stock_codes(text: str) -> List[str]:
     """Extract all explicit stock-code candidates from free text."""
     if not text:
@@ -129,6 +229,10 @@ def extract_stock_codes(text: str) -> List[str]:
     ):
         for match in _LOWERCASE_TICKER_PATTERN.finditer(text):
             _append_candidate(candidates, match.group(1), text)
+
+    # Chinese stock name resolution (e.g., "长江电力" -> "600900")
+    for code in _extract_stock_names_from_text(text):
+        _append_candidate(candidates, code, text)
 
     return candidates
 
@@ -226,6 +330,14 @@ def resolve_stock_scope(
         mode = "compare"
         allowed.update(candidates)
     elif _SWITCH_PATTERN.search(message_text) and len(new_candidates) == 1:
+        mode = "switch"
+        expected = new_candidates[0]
+        allowed = {expected}
+        effective_context = _switch_context(original_context, expected)
+    elif len(new_candidates) == 1 and not _is_compare_message(message_text, candidates, current_code):
+        # Implicit switch: user mentioned a different stock code/name
+        # without explicit switch keywords like "分析/看看".
+        # Treat it as a switch to the newly mentioned stock.
         mode = "switch"
         expected = new_candidates[0]
         allowed = {expected}

@@ -60,7 +60,7 @@ const QUICK_QUESTIONS = [
 const MAX_SELECTED_SKILLS = 3;
 const CONTEXT_COMPRESSION_CONFIG_KEY = 'AGENT_CONTEXT_COMPRESSION_ENABLED';
 const STRONG_COMPARE_STOCK_MESSAGE_RE = /比较|对比|\bvs\b|和[^，。,.!?！？]{0,40}比/i;
-const WEAK_COMPARE_STOCK_MESSAGE_RE = /差异(?!化)|区别|不同|相比|对照|比一比/;
+const WEAK_COMPARE_STOCK_MESSAGE_RE = /差异(?!化)|区别|不同|相比|对照|比一比|和/;
 const CHOICE_COMPARE_STOCK_MESSAGE_RE = /哪个|哪只|哪一个|谁更|更值得|更适合|怎么选|选哪|二选一/;
 const LINKED_COMPARE_STOCK_MESSAGE_RE = /(?:和|与|跟|同)[^，。,.!?！？]{0,40}(?:差异(?!化)|区别|不同|相比|对照|比一比)/;
 const SWITCH_STOCK_MESSAGE_RE = /换成|改看|分析|看看|研究|诊断/;
@@ -272,14 +272,27 @@ const resolveActiveStockContextFromMessage = (
   const newStockCodes = currentStockCode
     ? stockCodes.filter((code) => code !== currentStockCode)
     : stockCodes;
+  // When user mentions a different stock without explicit switch keywords,
+  // treat it as an implicit switch (e.g., "茅台现在适合买入吗？" -> switch to 600519).
+  const isImplicitSwitch = !!(
+    currentStockCode
+    && !isCompare
+    && newStockCodes.length >= 1
+    && normalizeStockCode(stockCode) !== currentStockCode
+  );
+  const isExplicitOrImplicitSwitch = isSwitch || isImplicitSwitch;
   // Explicit switches can mention the old stock; use the single new code when present.
-  const targetStockCode = isSwitch && newStockCodes.length === 1
+  const targetStockCode = isExplicitOrImplicitSwitch && newStockCodes.length === 1
     ? newStockCodes[0]
     : stockCode;
   const isDifferentStock = currentStockCode !== targetStockCode;
 
-  // Compare messages and implicit follow-ups must not rewrite the active stock context.
-  if (isCompare || (currentContext && !isSwitch)) {
+  // Compare messages must not rewrite the active stock context.
+  if (isCompare) {
+    return null;
+  }
+  // If there's no switch (explicit or implicit), keep the current context.
+  if (currentContext && !isExplicitOrImplicitSwitch) {
     return null;
   }
 
@@ -290,8 +303,8 @@ const resolveActiveStockContextFromMessage = (
         ? currentContext.stock_name
         : null,
     },
-    // Only explicit switches should affect the context sent with the current request.
-    useForCurrentSend: isSwitch && isDifferentStock,
+    // Only (explicit or implicit) switches should affect the context sent with the current request.
+    useForCurrentSend: isExplicitOrImplicitSwitch && isDifferentStock,
   };
 };
 

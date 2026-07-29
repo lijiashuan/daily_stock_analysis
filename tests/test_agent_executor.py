@@ -334,11 +334,13 @@ class TestAgentExecutor(unittest.TestCase):
         self.assertEqual(result.stock_scope.allowed_stock_codes, {"600519", "AAPL"})
 
     def test_resolve_stock_scope_keeps_ambiguous_bare_code_on_current_stock(self):
+        # A bare code like "AAPL" is now treated as an implicit switch
+        # (the user is clearly asking about a different stock).
         result = resolve_stock_scope("AAPL", {"stock_code": "600519", "stock_name": "贵州茅台"})
 
-        self.assertEqual(result.stock_scope.mode, "maintain")
-        self.assertEqual(result.effective_context["stock_code"], "600519")
-        self.assertEqual(result.stock_scope.allowed_stock_codes, {"600519"})
+        self.assertEqual(result.stock_scope.mode, "switch")
+        self.assertEqual(result.effective_context["stock_code"], "AAPL")
+        self.assertEqual(result.stock_scope.allowed_stock_codes, {"AAPL"})
 
     def test_run_agent_loop_blocks_conflicting_stock_scoped_tool_and_keeps_tool_result(self):
         executed_calls = []
@@ -1112,7 +1114,9 @@ class TestAgentExecutor(unittest.TestCase):
         self.assertEqual(ordered_roles, ["user", "assistant", "tool", "assistant", "user"])
         self.assertEqual(second_request_messages[-4]["reasoning_content"], "r1")
         self.assertEqual(second_request_messages[-3]["tool_call_id"], "call_1")
-        self.assertEqual(second_request_messages[-2]["content"], "first final")
+        # The AI response content includes a timestamp prefix (e.g., "（2026年07月17日08时18分）AI回复：...")
+        # Only verify the suffix to avoid flaky timestamp comparison.
+        self.assertIn("first final", second_request_messages[-2]["content"])
         self.assertEqual(second_request_messages[-1]["content"], "second question")
 
         DatabaseManager.reset_instance()
